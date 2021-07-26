@@ -2,11 +2,11 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Posts on Bailey&#39;s Tech Blog</title>
-    <link>https://github.com/bae12-jo/bae12-jo.github.io/posts/</link>
+    <link>https://bae12-jo.github.io/posts/</link>
     <description>Recent content in Posts on Bailey&#39;s Tech Blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en</language>
     <copyright>&amp;copy; 2021 &lt;a href=&#34;https://www.ruiqima.com/&#34;&gt;R. Ma&lt;/a&gt;
-</copyright><atom:link href="https://github.com/bae12-jo/bae12-jo.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
+</copyright><atom:link href="https://bae12-jo.github.io/posts/index.xml" rel="self" type="application/rss+xml" />
   </channel>
 </rss>
