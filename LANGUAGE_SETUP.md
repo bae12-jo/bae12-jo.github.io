@@ -28,12 +28,14 @@ lang: en
 ---
 ```
 
-### 2. 언어 전환 버튼 / Language Switcher Buttons
+### 2. 언어 전환 버튼 / Language Switcher Button
 
-- 우측 상단에 두 개의 버튼이 표시됩니다
-- Two buttons appear in the top-right corner:
-  - **한** : 한국어 포스트만 표시 / Show only Korean posts
-  - **A** : 영어 포스트만 표시 / Show only English posts
+- 좌측 상단 툴바에 🌐 (지구본) 아이콘이 표시됩니다
+- Globe icon (🌐) appears in the top-left toolbar
+- 클릭하면 언어 선택 드롭다운이 나타납니다
+- Click to show language selection dropdown:
+  - **🇰🇷 한국어** : 한국어 포스트만 표시 / Show only Korean posts
+  - **🇺🇸 English** : 영어 포스트만 표시 / Show only English posts
 
 ### 3. 자동 저장 / Auto-save
 
@@ -41,6 +43,23 @@ lang: en
 - Selected language is automatically saved in browser
 - 다음 방문 시 마지막 선택한 언어가 유지됩니다
 - Last selected language persists on next visit
+
+### 4. 소셜 링크 / Social Links
+
+우측 상단에 다음 링크가 표시됩니다:
+The following links appear in the top-right corner:
+- **GitHub** : GitHub 프로필 링크
+- **LinkedIn** : LinkedIn 프로필 링크
+
+`_config.yml`에서 링크를 수정하세요:
+Update links in `_config.yml`:
+```yaml
+sharing:
+  github: true
+  github_link: "https://github.com/your-username"
+  linkedin: true
+  linkedin_link: "https://www.linkedin.com/in/your-profile"
+```
 
 ## 파일 구조 / File Structure
 

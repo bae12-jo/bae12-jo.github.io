@@ -1,27 +1,19 @@
 require(['gitbook', 'jquery'], function(gitbook, $) {
     var SITES = {
-        'facebook': {
-            'label': 'Facebook',
-            'icon': 'fa fa-facebook',
-            'onClick': function(e) {
-                e.preventDefault();
-                window.open('http://www.facebook.com/sharer/sharer.php?s=100&p[url]='+encodeURIComponent(location.href));
-            }
-        },
-        'twitter': {
-            'label': 'Twitter',
-            'icon': 'fa fa-twitter',
-            'onClick': function(e) {
-                e.preventDefault();
-                window.open('http://twitter.com/home?status='+encodeURIComponent(document.title+' '+location.href));
-            }
-        },
         'github': {
             'label': 'Github',
             'icon': 'fa fa-github',
             'onClick': function(e) {
                 e.preventDefault();
                 window.open('https://github.com');
+            }
+        },
+        'linkedin': {
+            'label': 'LinkedIn',
+            'icon': 'fa fa-linkedin',
+            'onClick': function(e) {
+                e.preventDefault();
+                window.open('https://www.linkedin.com');
             }
         },
         'telegram': {

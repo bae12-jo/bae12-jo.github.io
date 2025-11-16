@@ -72,3 +72,14 @@ plugins:
   - jekyll-feed
   - jekyll-readme-index
   - jemoji
+
+# Social links configuration
+sharing:
+  github: true
+  github_link: "https://github.com/bae12-jo"
+  linkedin: true
+  linkedin_link: "https://www.linkedin.com/in/csbailey"
+  # Disable other social links
+  facebook: false
+  twitter: false
+  all: []
