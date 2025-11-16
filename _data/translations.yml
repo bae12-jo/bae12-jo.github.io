@@ -1,0 +1,16 @@
+# UI translations
+ko:
+  home: "홈"
+  posts: "포스트"
+  search: "검색"
+  toc: "목차"
+  previous: "이전"
+  next: "다음"
+  
+en:
+  home: "Home"
+  posts: "Posts"
+  search: "Search"
+  toc: "Table of Contents"
+  previous: "Previous"
+  next: "Next"

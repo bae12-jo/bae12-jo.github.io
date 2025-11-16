@@ -61,9 +61,9 @@
 
                         {% for post in reversed_posts %}
                             {% if page.url == post.url %}
-                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}">
+                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
                             {% else %}
-                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}">
+                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
                             {% endif %}
                                 <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
                                     {{ post.title | escape }}
@@ -93,9 +93,9 @@
 
                         {% for post in reversed_posts %}
                             {% if page.url == post.url %}
-                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}">
+                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
                             {% else %}
-                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}">
+                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
                             {% endif %}
                                 <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
                                     {{ post.title | escape }}

@@ -1,0 +1,98 @@
+<div class="language-switcher">
+    <button class="lang-btn" data-lang="ko" title="한국어">한</button>
+    <button class="lang-btn" data-lang="en" title="English">A</button>
+</div>
+
+<style>
+.language-switcher {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    gap: 5px;
+}
+
+.lang-btn {
+    width: 35px;
+    height: 35px;
+    border: 2px solid #4183c4;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    color: #4183c4;
+}
+
+.lang-btn:hover {
+    background: #4183c4;
+    color: white;
+    transform: scale(1.1);
+}
+
+.lang-btn.active {
+    background: #4183c4;
+    color: white;
+}
+
+@media (max-width: 768px) {
+    .language-switcher {
+        top: 10px;
+        right: 10px;
+    }
+    
+    .lang-btn {
+        width: 30px;
+        height: 30px;
+        font-size: 12px;
+    }
+}
+</style>
+
+<script>
+(function() {
+    // Get current language from localStorage or default to 'ko'
+    let currentLang = localStorage.getItem('preferredLang') || 'ko';
+    
+    // Set initial active state
+    function setActiveButton() {
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            if (btn.dataset.lang === currentLang) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+    
+    // Filter posts by language
+    function filterPostsByLanguage(lang) {
+        const posts = document.querySelectorAll('.chapter[data-lang]');
+        posts.forEach(post => {
+            if (post.dataset.lang === lang || !post.dataset.lang) {
+                post.style.display = '';
+            } else {
+                post.style.display = 'none';
+            }
+        });
+    }
+    
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        setActiveButton();
+        filterPostsByLanguage(currentLang);
+        
+        // Add click handlers
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentLang = this.dataset.lang;
+                localStorage.setItem('preferredLang', currentLang);
+                setActiveButton();
+                filterPostsByLanguage(currentLang);
+            });
+        });
+    });
+})();
+</script>
