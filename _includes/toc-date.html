@@ -51,7 +51,13 @@
             {% if site.ordered_collections %}
                 {% for label in site.ordered_collections %}
                     {% assign collection = site.collections | where: "label", label | first %}
-                    <!-- <p>{{ collection.label }}</p> -->
+                    {% if collection.label == "pages" %}
+                    <li class="header" data-lang="ko">분산 학습</li>
+                    <li class="header" data-lang="en" style="display:none">Distributed Training</li>
+                    {% elsif collection.label == "authors" %}
+                    <li class="header" data-lang="ko">저자</li>
+                    <li class="header" data-lang="en" style="display:none">Authors</li>
+                    {% endif %}
                     {% if collection.output %}
                         {% if collection.label == "posts" %}
                             {% assign reversed_posts = site[collection.label] | reverse %}
@@ -83,7 +89,13 @@
                 {% endfor %}
             {% else %}
                 {% for collection in site.collections %}
-                    <!-- <p>{{ collection.label }}</p> -->
+                    {% if collection.label == "pages" %}
+                    <li class="header" data-lang="ko">분산 학습</li>
+                    <li class="header" data-lang="en" style="display:none">Distributed Training</li>
+                    {% elsif collection.label == "authors" %}
+                    <li class="header" data-lang="ko">저자</li>
+                    <li class="header" data-lang="en" style="display:none">Authors</li>
+                    {% endif %}
                     {% if collection.output %}
                         {% if collection.label == "posts" %}
                             {% assign reversed_posts = site[collection.label] | reverse %}
