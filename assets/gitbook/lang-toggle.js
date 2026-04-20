@@ -26,6 +26,34 @@
     return meta ? meta.getAttribute('content') : null;
   }
 
+  function getSidebarOpen() {
+    return document.querySelector('.book').classList.contains('with-summary');
+  }
+
+  function setSidebarOpen(open) {
+    var book = document.querySelector('.book');
+    if (!book) return;
+    if (open) {
+      book.classList.add('with-summary');
+    } else {
+      book.classList.remove('with-summary');
+    }
+  }
+
+  function getScrollTop() {
+    var el = document.querySelector('.body-inner') || document.querySelector('.page-inner');
+    return el ? el.scrollTop : window.scrollY;
+  }
+
+  function restoreScrollTop(val) {
+    var el = document.querySelector('.body-inner') || document.querySelector('.page-inner');
+    if (el) {
+      el.scrollTop = val;
+    } else {
+      window.scrollTo(0, val);
+    }
+  }
+
   function injectButton() {
     if (document.querySelector('.lang-toggle-btn')) return;
     var header = document.querySelector('.book-header');
@@ -40,8 +68,12 @@
       var current = getLang();
       var next = current === 'ko' ? 'en' : 'ko';
       setLang(next);
+
       var peer = getPeer();
       if (peer) {
+        // Save state before navigation
+        sessionStorage.setItem('restore-scroll', getScrollTop());
+        sessionStorage.setItem('restore-sidebar', getSidebarOpen() ? '1' : '0');
         window.location.href = peer;
       } else {
         filterSidebar(next);
@@ -52,45 +84,48 @@
     header.appendChild(btn);
   }
 
+  function restoreState() {
+    var scroll = sessionStorage.getItem('restore-scroll');
+    var sidebar = sessionStorage.getItem('restore-sidebar');
+
+    if (scroll !== null) {
+      sessionStorage.removeItem('restore-scroll');
+      setTimeout(function() { restoreScrollTop(parseInt(scroll, 10)); }, 200);
+    }
+    if (sidebar !== null) {
+      sessionStorage.removeItem('restore-sidebar');
+      setTimeout(function() { setSidebarOpen(sidebar === '1'); }, 50);
+    }
+  }
+
   function init() {
     var lang = getLang();
     injectButton();
     updateBtn(lang);
     filterSidebar(lang);
+    restoreState();
   }
 
-  // Initial load
   document.addEventListener('DOMContentLoaded', init);
 
-  // GitBook SPA navigation
-  if (typeof gitbook !== 'undefined') {
-    gitbook.events.bind('page.change', function() { setTimeout(init, 100); });
-  } else {
-    document.addEventListener('DOMContentLoaded', function() {
-      if (typeof gitbook !== 'undefined') {
-        gitbook.events.bind('page.change', function() { setTimeout(init, 100); });
-      }
-    });
+  function bindGitbook() {
+    if (typeof gitbook !== 'undefined') {
+      gitbook.events.bind('page.change', function() { setTimeout(init, 100); });
+    }
   }
 
-  // MutationObserver fallback: re-init when book-header content changes
-  var observer = new MutationObserver(function(mutations) {
-    for (var m of mutations) {
-      if (m.target.classList && m.target.classList.contains('book-header')) {
-        if (!document.querySelector('.lang-toggle-btn')) {
-          setTimeout(init, 50);
-        }
-        break;
-      }
-    }
+  document.addEventListener('DOMContentLoaded', function() {
+    bindGitbook();
+    if (typeof gitbook === 'undefined') setTimeout(bindGitbook, 1000);
   });
 
+  var observer = new MutationObserver(function() {
+    if (!document.querySelector('.lang-toggle-btn')) {
+      setTimeout(init, 50);
+    }
+  });
   document.addEventListener('DOMContentLoaded', function() {
     var header = document.querySelector('.book-header');
-    if (header) {
-      observer.observe(header, { childList: true, subtree: true });
-    }
-    // Also observe body for header replacement
-    observer.observe(document.body, { childList: true, subtree: false });
+    if (header) observer.observe(header, { childList: true, subtree: true });
   });
 })();
