@@ -1,5 +1,5 @@
 ---
-title: "GPU Cluster 세팅하기"
+title: "분산 학습 - GPU Cluster 세팅하기"
 author: Bailey Sohyeon Cho
 date: 2026-04-20
 category: Infrastructure

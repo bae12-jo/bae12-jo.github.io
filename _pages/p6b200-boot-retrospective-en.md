@@ -1,5 +1,5 @@
 ---
-title: "Setting Up a GPU Cluster"
+title: "Distributed Training - Setting Up a GPU Cluster"
 author: Bailey Sohyeon Cho
 date: 2026-04-20
 category: Infrastructure
