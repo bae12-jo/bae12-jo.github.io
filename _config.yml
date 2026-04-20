@@ -36,7 +36,7 @@ kramdown:
   syntax_highlighter_opts:
     guess_lang:           true
 
-syntax_highlighter_style: colorful
+syntax_highlighter_style: monokai
 
 markdown_ext:             markdown,mkdown,mkdn,mkd,md
 
@@ -76,3 +76,6 @@ plugins:
 # Social links - update with your profiles
 github_username: bae12-jo
 linkedin_username: csbailey  # LinkedIn username from URL: linkedin.com/in/YOUR-USERNAME
+
+extra_header_js:
+  - assets/gitbook/lang-toggle.js
