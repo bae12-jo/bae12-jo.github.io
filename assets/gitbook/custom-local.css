@@ -25,3 +25,12 @@
     padding: 0;
     font-size: 0.875em;
 }
+
+/* Hide globe language switcher button */
+.lang-switcher-btn,
+.lang-switcher-dropdown,
+a[data-action="language"],
+.book-header a.fa-globe,
+.book-header .fa-globe {
+  display: none !important;
+}
