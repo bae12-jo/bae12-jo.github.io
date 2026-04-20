@@ -26,8 +26,10 @@
     return meta ? meta.getAttribute('content') : null;
   }
 
+  // ---------- Sidebar state ----------
   function getSidebarOpen() {
-    return document.querySelector('.book').classList.contains('with-summary');
+    return document.querySelector('.book') &&
+           document.querySelector('.book').classList.contains('with-summary');
   }
 
   function setSidebarOpen(open) {
@@ -40,20 +42,59 @@
     }
   }
 
-  function getScrollTop() {
-    var el = document.querySelector('.body-inner') || document.querySelector('.page-inner');
-    return el ? el.scrollTop : window.scrollY;
+  // Save which .chapter li elements have the 'expanded' class (expandable-chapters state)
+  function getExpandedChapters() {
+    var expanded = [];
+    document.querySelectorAll('.book-summary li.chapter.expanded').forEach(function(li) {
+      expanded.push(li.getAttribute('data-path') || '');
+    });
+    return expanded.join(',');
   }
 
-  function restoreScrollTop(val) {
+  function restoreExpandedChapters(paths) {
+    if (!paths) return;
+    var list = paths.split(',').filter(Boolean);
+    document.querySelectorAll('.book-summary li.chapter').forEach(function(li) {
+      if (list.indexOf(li.getAttribute('data-path') || '') !== -1) {
+        li.classList.add('expanded');
+      }
+    });
+  }
+
+  // ---------- Scroll & hash ----------
+  function getScrollInfo() {
+    // Return current hash (section anchor) + raw scrollTop as fallback
+    var hash = window.location.hash || '';
     var el = document.querySelector('.body-inner') || document.querySelector('.page-inner');
-    if (el) {
-      el.scrollTop = val;
-    } else {
-      window.scrollTo(0, val);
+    var top = el ? el.scrollTop : window.scrollY;
+    return { hash: hash, top: top };
+  }
+
+  function restoreScroll(hash, top) {
+    // Prefer hash-based navigation (same section heading on peer page)
+    if (hash) {
+      var target = document.querySelector(hash);
+      if (target) {
+        setTimeout(function() {
+          var container = document.querySelector('.body-inner') || document.querySelector('.page-inner');
+          if (container) {
+            container.scrollTop = target.offsetTop - 20;
+          } else {
+            target.scrollIntoView();
+          }
+        }, 300);
+        return;
+      }
     }
+    // Fallback: restore raw scroll position
+    var el = document.querySelector('.body-inner') || document.querySelector('.page-inner');
+    setTimeout(function() {
+      if (el) { el.scrollTop = top; }
+      else { window.scrollTo(0, top); }
+    }, 300);
   }
 
+  // ---------- Button ----------
   function injectButton() {
     if (document.querySelector('.lang-toggle-btn')) return;
     var header = document.querySelector('.book-header');
@@ -63,6 +104,7 @@
     btn.className = 'lang-toggle-btn';
     btn.href = '#';
     btn.style.cssText = 'position:absolute;right:66px;top:0;line-height:50px;padding:0 12px;font-size:13px;font-weight:bold;color:inherit;text-decoration:none;z-index:10;';
+
     btn.addEventListener('click', function(e) {
       e.preventDefault();
       var current = getLang();
@@ -71,33 +113,47 @@
 
       var peer = getPeer();
       if (peer) {
-        // Save state before navigation
-        sessionStorage.setItem('restore-scroll', getScrollTop());
+        var scrollInfo = getScrollInfo();
+        sessionStorage.setItem('restore-hash', scrollInfo.hash);
+        sessionStorage.setItem('restore-scroll', scrollInfo.top);
         sessionStorage.setItem('restore-sidebar', getSidebarOpen() ? '1' : '0');
-        window.location.href = peer;
+        sessionStorage.setItem('restore-expanded', getExpandedChapters());
+        // Navigate to peer, preserving hash if any
+        window.location.href = peer + scrollInfo.hash;
       } else {
         filterSidebar(next);
         updateBtn(next);
       }
     });
+
     header.style.position = 'relative';
     header.appendChild(btn);
   }
 
+  // ---------- Restore ----------
   function restoreState() {
-    var scroll = sessionStorage.getItem('restore-scroll');
+    var hash    = sessionStorage.getItem('restore-hash');
+    var scroll  = sessionStorage.getItem('restore-scroll');
     var sidebar = sessionStorage.getItem('restore-sidebar');
+    var expanded = sessionStorage.getItem('restore-expanded');
 
-    if (scroll !== null) {
+    if (scroll !== null || hash) {
+      sessionStorage.removeItem('restore-hash');
       sessionStorage.removeItem('restore-scroll');
-      setTimeout(function() { restoreScrollTop(parseInt(scroll, 10)); }, 200);
+      restoreScroll(hash || '', parseInt(scroll || '0', 10));
     }
     if (sidebar !== null) {
       sessionStorage.removeItem('restore-sidebar');
-      setTimeout(function() { setSidebarOpen(sidebar === '1'); }, 50);
+      // Slight delay so gitbook layout settles first
+      setTimeout(function() { setSidebarOpen(sidebar === '1'); }, 80);
+    }
+    if (expanded !== null) {
+      sessionStorage.removeItem('restore-expanded');
+      setTimeout(function() { restoreExpandedChapters(expanded); }, 150);
     }
   }
 
+  // ---------- Init ----------
   function init() {
     var lang = getLang();
     injectButton();
