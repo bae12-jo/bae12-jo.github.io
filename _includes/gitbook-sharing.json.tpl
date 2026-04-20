@@ -7,7 +7,7 @@
                 "vk": false,
                 "weibo": false,
 
-                "github": true,
+                "github": false,
               {% if site.github_username %}
                 "github_link": "https://github.com/{{ site.github_username }}",
               {% elsif site.sharing.github_link %}

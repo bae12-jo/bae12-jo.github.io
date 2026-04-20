@@ -67,7 +67,7 @@ plugins:
   - jekyll-readme-index
   - jemoji
 
-github_username: bae12-jo
+github_username:
 linkedin_username:
 
 extra_header_js:
