@@ -11,9 +11,7 @@
             if ($(document).width() <= 1240) {
                 let target = $($(element).attr('href'));
                 if (target.length) {
-                    $('div.body-inner').animate({
-                        scrollTop: target.get(0).offsetTop,
-                    });
+                    $('div.body-inner').animate({ scrollTop: target.get(0).offsetTop });
                 }
             }
             return true;
@@ -36,11 +34,7 @@
                 <a href="{{site.baseurl}}/" onclick="pageScrollToTop(this)">
                     {{ site.title | escape }}
                 </a>
-                {% if site.toc.enabled %}
-                    {% if site.toc.enabled_index %}
-                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                    {% endif %}
-                {% endif %}
+                {% if site.toc.enabled %}{% if site.toc.enabled_index %}{% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}{% endif %}{% endif %}
             </li>
 
             <li class="divider"></li>
@@ -61,10 +55,13 @@
 
                         {% for post in all_posts %}
                             {% unless post.parent %}
+                                {% assign children = all_posts | where: "parent", post.title %}
+                                {% assign has_children = false %}
+                                {% if children.size > 0 %}{% assign has_children = true %}{% endif %}
+
+                                {% comment %} Mark parent active if current page is this post or one of its children {% endcomment %}
                                 {% assign is_active = false %}
                                 {% if page.url == post.url %}{% assign is_active = true %}{% endif %}
-                                {% comment %} also mark parent active when a child is active {% endcomment %}
-                                {% assign children = all_posts | where: "parent", post.title %}
                                 {% for child in children %}
                                     {% if page.url == child.url %}{% assign is_active = true %}{% endif %}
                                 {% endfor %}
@@ -77,33 +74,39 @@
                                     <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
                                         {{ post.title | escape }}
                                     </a>
-                                    {% if site.toc.enabled %}
-                                        {% if page.url == post.url %}
+
+                                    {% if has_children %}
+                                        {% comment %}
+                                            Page has child posts: show in-page TOC anchors first (when active),
+                                            then child page links — all inside one <ul class="articles"> so
+                                            gitbook CSS handles them as a single expandable group.
+                                        {% endcomment %}
+                                        <ul class="articles">
+                                            {% if site.toc.enabled and page.url == post.url %}
+                                                {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
+                                            {% endif %}
+                                            {% for child in children %}
+                                                {% if page.url == child.url %}
+                                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                                {% else %}
+                                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                                {% endif %}
+                                                    <a href="{{site.baseurl}}{{child.url}}" onclick="pageScrollToTop(this)">
+                                                        {{ child.title | escape }}
+                                                    </a>
+                                                    {% if site.toc.enabled and page.url == child.url %}
+                                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
+                                                    {% endif %}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% else %}
+                                        {% comment %} No child posts: show in-page TOC anchors normally {% endcomment %}
+                                        {% if site.toc.enabled and page.url == post.url %}
                                             {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
                                         {% endif %}
                                     {% endif %}
 
-                                    {% assign children = all_posts | where: "parent", post.title %}
-                                    {% if children.size > 0 %}
-                                    <ul class="articles">
-                                        {% for child in children %}
-                                            {% if page.url == child.url %}
-                                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
-                                            {% else %}
-                                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
-                                            {% endif %}
-                                                <a href="{{site.baseurl}}{{child.url}}" onclick="pageScrollToTop(this)">
-                                                    {{ child.title | escape }}
-                                                </a>
-                                                {% if site.toc.enabled %}
-                                                    {% if page.url == child.url %}
-                                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                                    {% endif %}
-                                                {% endif %}
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% endif %}
                                 </li>
                             {% endunless %}
                         {% endfor %}

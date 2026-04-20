@@ -62,7 +62,7 @@
     var btn = document.createElement('a');
     btn.className = 'lang-toggle-btn';
     btn.href = '#';
-    btn.style.cssText = 'position:absolute;right:16px;top:0;line-height:50px;padding:0 12px;font-size:13px;font-weight:bold;color:inherit;text-decoration:none;z-index:10;';
+    btn.style.cssText = 'position:absolute;right:66px;top:0;line-height:50px;padding:0 12px;font-size:13px;font-weight:bold;color:inherit;text-decoration:none;z-index:10;';
     btn.addEventListener('click', function(e) {
       e.preventDefault();
       var current = getLang();
