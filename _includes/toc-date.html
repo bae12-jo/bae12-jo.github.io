@@ -51,48 +51,16 @@
             {% if site.ordered_collections %}
                 {% for label in site.ordered_collections %}
                     {% assign collection = site.collections | where: "label", label | first %}
-                    {% if collection.label == "pages" %}
-                    <li class="header" data-lang="ko">블로그</li>
-                    <li class="header" data-lang="en" style="display:none">BLOG</li>
-                    {% elsif collection.label == "authors" %}
-                    <li class="header" data-lang="ko">저자</li>
-                    <li class="header" data-lang="en" style="display:none">AUTHORS</li>
-                    {% endif %}
-                        {% if collection.label == "posts" %}
-                            {% assign reversed_posts = site[collection.label] | reverse %}
-                        {% else %}
-                            {% assign reversed_posts = site[collection.label] %}
+                    {% if collection.output %}
+                        {% if collection.label == "pages" %}
+                        <li class="header" data-lang="ko">블로그</li>
+                        <li class="header" data-lang="en" style="display:none">BLOG</li>
+                        {% elsif collection.label == "authors" %}
+                        <li class="header" data-lang="ko">저자</li>
+                        <li class="header" data-lang="en" style="display:none">AUTHORS</li>
                         {% endif %}
 
-                        {% for post in reversed_posts %}
-                            {% if page.url == post.url %}
-                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                            {% else %}
-                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                            {% endif %}
-                                <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
-                                    {{ post.title | escape }}
-                                </a>
-                                {% if site.toc.enabled %}
-                                    {% if page.url == post.url %}
-                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                    {% endif %}
-                                {% endif %}
-                            </li>
-                        {% endfor %}
-
-                        {% if reversed_posts.size > 0 %}
-                            <li class="divider"></li>
-                        {% endif %}
-                    {% endif %}
-                {% endfor %}
-            {% else %}
-                {% for collection in site.collections %}
-                        {% if collection.label == "posts" %}
-                            {% assign reversed_posts = site[collection.label] | reverse %}
-                        {% else %}
-                            {% assign reversed_posts = site[collection.label] %}
-                        {% endif %}
+                        {% assign reversed_posts = site[collection.label] %}
 
                         {% for post in reversed_posts %}
                             {% if page.url == post.url %}
