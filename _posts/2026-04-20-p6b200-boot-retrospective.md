@@ -1,5 +1,5 @@
 ---
-title: "P6-B200 Compute Node 안정화 회고"
+title: "GPU Cluster 세팅하기"
 author: Bailey Sohyeon Cho
 date: 2026-04-20
 category: Infrastructure
@@ -7,11 +7,11 @@ layout: post
 lang: ko
 ---
 
-# P6-B200 Compute Node 안정화 회고
+# P6-B200 on AWS ParallelCluster
 
 > **기간**: 2026-04-19 ~ 2026-04-20  
 > **목표**: pcluster 3.15 + p6-b200.48xlarge 컴퓨트 노드 안정 부팅  
-> **결과**: AMI v7 (`ami-00a519913cff04008`) 으로 20분+ 안정 확인 ✅
+> **결과**: AMI v7 (`ami-00a519913cff04008`) 으로 20분+ 안정 확인
 
 ---
 
@@ -124,7 +124,7 @@ Mixlib::ShellOut::ShellCommandFailed: exit code 19
 
 ---
 
-### Phase 7 — AMI v7: lustre 커널 모듈 추가 ✅ **성공**
+### Phase 7 — AMI v7: lustre 커널 모듈 추가 **[성공]**
 
 **원인 분석**:
 - 헤드노드 커널: `6.8.0-1050-aws` → lustre 모듈 `-1050` 버전으로 설치됨
@@ -136,7 +136,7 @@ Mixlib::ShellOut::ShellCommandFailed: exit code 19
 apt install lustre-client-modules-$(uname -r) lustre-client-utils -y
 ```
 
-**결과**: **20분+ 안정적으로 running, job R 20:10, 슬럼 노드 alloc** ✅
+**결과**: **20분+ 안정적으로 running, job R 20:10, 슬럼 노드 alloc**
 
 ---
 
@@ -146,9 +146,9 @@ apt install lustre-client-modules-$(uname -r) lustre-client-utils -y
 
 | 상태 | 의미 | cinc `start` 시 |
 |------|------|----------------|
-| `enabled` | 자동시작 O | 이미 running이면 no-op ✅ |
+| `enabled` | 자동시작 O | 이미 running이면 no-op |
 | `disabled` | 자동시작 X | start 시도 → 성공/실패 |
-| `masked` | 완전 차단 | **항상 실패** ❌ |
+| `masked` | 완전 차단 | **항상 실패** |
 
 > **결론**: cinc가 `start`를 호출하므로 `masked`는 절대 금지.  
 > AMI bake 전 반드시 `unmask + enable` 상태로 만들 것.

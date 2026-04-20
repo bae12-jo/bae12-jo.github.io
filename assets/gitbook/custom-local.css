@@ -1,5 +1,27 @@
-/* This file is kept intentionally blank inside the jekyll-github-theme
- * It gets imported at the end of custom.css
- * Its purpose is for users of the theme to be able to add css rules from a blank file
- *   these get simply added to the ones already active in the layout.
- */
+/* Code block styling */
+.markdown-section pre {
+    background-color: #1e1e2e;
+    border-radius: 6px;
+    border-left: 4px solid #7c8cf8;
+    padding: 16px;
+}
+
+.markdown-section pre > code {
+    color: #cdd6f4;
+    background-color: transparent;
+}
+
+.markdown-section code {
+    background-color: #e8eaf6;
+    color: #3949ab;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 0.9em;
+}
+
+.markdown-section pre > code {
+    background-color: transparent;
+    color: #cdd6f4;
+    padding: 0;
+    font-size: 0.875em;
+}
