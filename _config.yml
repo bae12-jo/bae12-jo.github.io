@@ -68,7 +68,7 @@ plugins:
   - jemoji
 
 github_username: bae12-jo
-linkedin_username: csbailey
+linkedin_username:
 
 extra_header_js:
   - assets/gitbook/lang-toggle.js

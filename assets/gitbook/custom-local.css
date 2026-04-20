@@ -34,3 +34,13 @@ a[data-action="language"],
 .book-header .fa-globe {
   display: none !important;
 }
+
+/* Move font settings button to right */
+.book-header .font-settings {
+  float: right !important;
+  position: static !important;
+}
+.book-header .font-settings .dropdown-menu {
+  right: 0;
+  left: auto;
+}

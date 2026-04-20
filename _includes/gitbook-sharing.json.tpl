@@ -16,7 +16,7 @@
                 "github_link": "https://github.com",
               {% endif %}
 
-                "linkedin": true,
+                "linkedin": false,
               {% if site.linkedin_username %}
                 "linkedin_link": "https://www.linkedin.com/in/{{ site.linkedin_username }}",
               {% elsif site.sharing.linkedin_link %}
