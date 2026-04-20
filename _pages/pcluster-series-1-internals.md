@@ -50,7 +50,9 @@ slurmctld starts on HeadNode
 clustermgtd detects nodes and marks them idle
 ```
 
-If any step fails or hangs, the whole cluster creation stalls indefinitely.
+If a compute node fails to bootstrap, it gets terminated and relaunched. Since the same broken code runs on every attempt, the node will keep dying in the same way. ParallelCluster retries up to the configured limit, cycling through terminate and relaunch until either the problem is fixed or the HeadNode bootstrap timeout expires.
+
+The HeadNode itself has its own timeout: `HeadNodeBootstrapTimeout` (default 1800 seconds). If the HeadNode fails to complete its bootstrap within that window, CloudFormation marks the entire stack as failed and triggers a rollback — taking everything with it. Compute node failures that consume the full retry budget before cfn-signal arrives can push the overall deployment past this limit. Set `HeadNodeBootstrapTimeout` generously when iterating on a new cluster configuration.
 
 ---
 
