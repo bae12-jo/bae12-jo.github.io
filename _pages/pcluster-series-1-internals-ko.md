@@ -194,6 +194,15 @@ post-slurmd 스크립트는 시간이 얼마나 걸리든 관계없습니다. cf
 
 추가로: NCCL 테스트 바이너리는 크고 빌드 시간이 깁니다. 공유 스토리지(`/fsx/nccl-tests/bin/`)에 한 번만 빌드해서 저장하고, 이후 노드 시작 시에는 빌드를 건너뛰도록 조건을 넣으면 됩니다.
 
+여기서 AMI에 패키지를 pre-bake하기 시작하면 쉽게 빠지는 함정이 있습니다. enroot, Pyxis, NCCL이 이미 AMI에 들어 있는데 OnNodeConfigured 스크립트에서 apt로 다시 설치를 시도하면, apt가 이전에는 필요 없던 `linux-modules-extra` 같은 의존성 패키지를 끌어옵니다. 이 패키지들이 커널 업그레이드를 트리거해 `/var/run/reboot-required`를 생성합니다. cinc finalize가 이 파일을 읽고 노드를 재부팅합니다. slurmd가 하트비트를 보내지 못합니다. clustermgtd가 노드를 비정상으로 판정하고 교체합니다. 무작위 부트스트랩 실패처럼 보이는 교체 루프가 생깁니다.
+
+해결책: 패키지가 AMI에 이미 들어 있으면 OnNodeConfigured에서 설치 단계를 완전히 제거하세요. `dpkg -l` 가드를 쓰더라도 최소화하세요. 그리고 `/etc/apt/apt.conf.d/99-no-reboot-required`가 AMI에 포함되어 있는지 확인해서, 뭔가 빠져나가더라도 플래그가 지워지게 하세요.
+
+> ##### WARNING
+>
+> OnNodeConfigured에서 `/opt/slurm/etc/plugstack.conf`나 `/etc/slurm/plugstack.conf.d/`를 수정하지 마세요. cinc는 시작 시 Slurm 설정을 검증하면서 plugstack.conf에 참조된 모든 경로가 실제로 존재하는지 확인합니다. 아직 존재하지 않는 `.so` 파일을 가리키는 Pyxis 항목을 추가하면 cinc가 즉시 abort합니다. cfn-signal이 발송되기 전, 50초 이내에 노드가 꺼지고 clustermgtd가 비정상으로 표시합니다. Pyxis SPANK 플러그인 등록은 클러스터 시작 시가 아니라 AMI 빌드 시에 해야 합니다.
+{: .block-warning }
+
 ---
 
 ## clustermgtd: 클러스터의 운영 대장

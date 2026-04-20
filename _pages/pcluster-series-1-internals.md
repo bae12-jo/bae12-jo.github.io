@@ -194,6 +194,15 @@ The post-slurmd script can then take as long as it needs. It runs after cfn-sign
 
 One more thing: NCCL test binaries are large and benefit from being built once and stored on shared storage. Build them to `/fsx/nccl-tests/bin/` the first time, then skip the build on subsequent node launches.
 
+There is a subtle failure mode here that is easy to hit when you start baking things into your AMI. If enroot, Pyxis, or NCCL are already present in the AMI and your OnNodeConfigured script tries to install them again via apt, apt will pull in dependency packages like `linux-modules-extra` that were not needed before. Those packages trigger kernel upgrades that write `/var/run/reboot-required`. cinc finalize reads that file and reboots the node. slurmd never sends its heartbeat. clustermgtd marks the node unhealthy and replaces it. You get a replacement loop that looks like a random bootstrap failure.
+
+The fix: once a package is baked into the AMI, remove the install step from OnNodeConfigured entirely. Use `dpkg -l` guards at most. And make sure `/etc/apt/apt.conf.d/99-no-reboot-required` is in the AMI so the flag gets cleared even if something slips through.
+
+> ##### WARNING
+>
+> Do not modify `/opt/slurm/etc/plugstack.conf` or `/etc/slurm/plugstack.conf.d/` in OnNodeConfigured. cinc validates the Slurm configuration at startup and checks that every path referenced in plugstack.conf actually exists. If you add a Pyxis entry pointing to a `.so` file that does not exist yet, cinc aborts immediately. The node shuts down within 50 seconds, before cfn-signal ever fires, and clustermgtd marks it unhealthy. Pyxis SPANK plugin registration must happen at AMI build time, not at cluster launch time.
+{: .block-warning }
+
 ---
 
 ## clustermgtd: the cluster's operations controller
