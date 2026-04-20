@@ -27,6 +27,7 @@ favicon_path:     /assets/gitbook/images/favicon.ico
 # markdown render engine.
 markdown:         kramdown
 kramdown:
+  parse_block_html: true
   auto_ids:               true
   input:                  GFM
   math_engine:            mathjax
