@@ -1,5 +1,5 @@
 ---
-title: "Distributed Training - Part 2: How AWS ParallelCluster Works Under the Hood"
+title: "Part 2: How AWS ParallelCluster Works Under the Hood"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en

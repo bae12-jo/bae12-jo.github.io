@@ -1,5 +1,5 @@
 ---
-title: "Distributed Training - Part 1: Built by AWS, Run by You"
+title: "Part 1: Built by AWS, Run by You"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en

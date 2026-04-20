@@ -1,5 +1,5 @@
 ---
-title: "분산 학습 - Part 2: AWS ParallelCluster 내부 동작 원리"
+title: "Part 2: AWS ParallelCluster 내부 동작 원리"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko

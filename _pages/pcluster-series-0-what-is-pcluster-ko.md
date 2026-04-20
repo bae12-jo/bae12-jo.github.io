@@ -1,5 +1,5 @@
 ---
-title: "분산 학습 - Part 1: AWS가 만들었지만 당신이 실행한다"
+title: "Part 1: AWS가 만들었지만 당신이 실행한다"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko

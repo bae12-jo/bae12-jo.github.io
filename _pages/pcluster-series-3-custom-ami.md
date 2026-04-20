@@ -1,5 +1,5 @@
 ---
-title: "Distributed Training - Part 4: Building a Custom AMI for p6-b200"
+title: "Part 4: Building a Custom AMI for p6-b200"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en

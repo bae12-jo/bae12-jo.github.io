@@ -1,5 +1,5 @@
 ---
-title: "분산 학습 - Part 4: p6-b200을 위한 커스텀 AMI 만들기"
+title: "Part 4: p6-b200을 위한 커스텀 AMI 만들기"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko

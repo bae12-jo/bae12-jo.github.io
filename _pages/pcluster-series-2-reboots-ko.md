@@ -1,5 +1,5 @@
 ---
-title: "분산 학습 - Part 3: p6-b200 노드가 계속 재부팅되는 이유"
+title: "Part 3: p6-b200 노드가 계속 재부팅되는 이유"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
