@@ -51,62 +51,26 @@
                         <li class="header" data-lang="en" style="display:none">AUTHORS</li>
                         {% endif %}
 
-                        {% assign all_posts = site[collection.label] %}
+                        {% assign reversed_posts = site[collection.label] %}
 
-                        {% for post in all_posts %}
-                            {% unless post.parent %}
-                                {% assign children = all_posts | where: "parent", post.title %}
-                                {% assign has_children = false %}
-                                {% if children.size > 0 %}{% assign has_children = true %}{% endif %}
-
-                                {% assign is_active = false %}
-                                {% if page.url == post.url %}{% assign is_active = true %}{% endif %}
-                                {% for child in children %}
-                                    {% if page.url == child.url %}{% assign is_active = true %}{% endif %}
-                                {% endfor %}
-
-                                {% if is_active %}
-                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                                {% else %}
-                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                                {% endif %}
-                                    <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
-                                        {{ post.title | escape }}
-                                    </a>
-
-                                    {% if has_children %}
-                                        <ul class="articles">
-                                            {% if site.toc.enabled and page.url == post.url %}
-                                                {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                            {% endif %}
-                                            {% for child in children %}
-                                                {% comment %} inherit parent lang so filterSidebar hides/shows correctly {% endcomment %}
-                                                {% assign child_lang = child.lang | default: post.lang %}
-                                                {% if page.url == child.url %}
-                                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child_lang %}data-lang="{{child_lang}}"{% endif %}>
-                                                {% else %}
-                                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child_lang %}data-lang="{{child_lang}}"{% endif %}>
-                                                {% endif %}
-                                                    <a href="{{site.baseurl}}{{child.url}}" onclick="pageScrollToTop(this)">
-                                                        {{ child.title | escape }}
-                                                    </a>
-                                                    {% if site.toc.enabled and page.url == child.url %}
-                                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                                    {% endif %}
-                                                </li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% else %}
-                                        {% if site.toc.enabled and page.url == post.url %}
-                                            {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                        {% endif %}
+                        {% for post in reversed_posts %}
+                            {% if page.url == post.url %}
+                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
+                            {% else %}
+                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
+                            {% endif %}
+                                <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
+                                    {{ post.title | escape }}
+                                </a>
+                                {% if site.toc.enabled %}
+                                    {% if page.url == post.url %}
+                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
                                     {% endif %}
-
-                                </li>
-                            {% endunless %}
+                                {% endif %}
+                            </li>
                         {% endfor %}
 
-                        {% if all_posts.size > 0 %}
+                        {% if reversed_posts.size > 0 %}
                             <li class="divider"></li>
                         {% endif %}
                     {% endif %}
