@@ -1,0 +1,17 @@
+ko:
+  - title: "분산 학습을 위한 GPU Cluster 세팅하기"
+    url: /pages/distributed-training/
+    children:
+      - title: "GPU 클러스터 구성하기"
+        url: /pages/p6b200-boot-retrospective/
+
+en:
+  - title: "Setting Up a GPU Cluster for Distributed Training"
+    url: /pages/distributed-training-en/
+    children:
+      - title: "Part 1: How AWS ParallelCluster Works Under the Hood"
+        url: /pages/pcluster-series-1-internals/
+      - title: "Part 2: Why Your p6-b200 Nodes Keep Rebooting"
+        url: /pages/pcluster-series-2-reboots/
+      - title: "Part 3: Building a Custom AMI for p6-b200"
+        url: /pages/pcluster-series-3-custom-ami/
