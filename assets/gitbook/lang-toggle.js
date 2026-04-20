@@ -1,5 +1,7 @@
 (function() {
   function getLang() {
+    var meta = document.querySelector('meta[name="page-lang"]');
+    if (meta) return meta.getAttribute('content');
     return localStorage.getItem('preferred-lang') || 'ko';
   }
 
@@ -7,32 +9,35 @@
     localStorage.setItem('preferred-lang', lang);
   }
 
-  function applyLang(lang) {
-    document.querySelectorAll('.lang-ko').forEach(function(el) {
-      el.style.display = lang === 'ko' ? '' : 'none';
+  function filterSidebar(lang) {
+    document.querySelectorAll('.book-summary li[data-lang]').forEach(function(li) {
+      if (li.getAttribute('data-lang') === lang) {
+        li.style.display = '';
+      } else {
+        li.style.display = 'none';
+      }
     });
-    document.querySelectorAll('.lang-en').forEach(function(el) {
-      el.style.display = lang === 'en' ? '' : 'none';
+    // items without data-lang always show
+    document.querySelectorAll('.book-summary li:not([data-lang])').forEach(function(li) {
+      li.style.display = '';
     });
+  }
+
+  function updateToggleBtn(lang) {
     document.querySelectorAll('.lang-toggle-btn').forEach(function(btn) {
       btn.textContent = lang === 'ko' ? 'EN' : '한';
     });
   }
 
-  function toggleLang() {
-    var current = getLang();
-    var next = current === 'ko' ? 'en' : 'ko';
-    var scrollY = window.scrollY;
-    setLang(next);
-    applyLang(next);
-    window.scrollTo(0, scrollY);
+  function getPeer() {
+    var meta = document.querySelector('meta[name="lang-peer"]');
+    return meta ? meta.getAttribute('content') : null;
   }
 
   function injectButton() {
-    if (!document.querySelector('.lang-ko, .lang-en')) return;
-
     var header = document.querySelector('.book-header');
     if (!header) return;
+    if (document.querySelector('.lang-toggle-btn')) return;
 
     var btn = document.createElement('a');
     btn.className = 'lang-toggle-btn';
@@ -52,7 +57,17 @@
 
     btn.addEventListener('click', function(e) {
       e.preventDefault();
-      toggleLang();
+      var current = getLang();
+      var next = current === 'ko' ? 'en' : 'ko';
+      setLang(next);
+      var peer = getPeer();
+      if (peer) {
+        window.location.href = peer;
+      } else {
+        // no peer page — just filter sidebar
+        filterSidebar(next);
+        updateToggleBtn(next);
+      }
     });
 
     header.style.position = 'relative';
@@ -60,7 +75,9 @@
   }
 
   document.addEventListener('DOMContentLoaded', function() {
+    var lang = getLang();
     injectButton();
-    applyLang(getLang());
+    updateToggleBtn(lang);
+    filterSidebar(lang);
   });
 })();
