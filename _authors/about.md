@@ -6,7 +6,7 @@ layout: post
 
 # Bailey Sohyeon Cho
 
-Infrastructure engineer focused on distributed systems, GPU clusters, and ML infrastructure on AWS.
+Solutions Architect focused on distributed systems, GPU clusters, and ML infrastructure on AWS.
 
 ## Links
 
