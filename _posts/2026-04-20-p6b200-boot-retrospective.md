@@ -6,7 +6,7 @@ category: Infrastructure
 layout: post
 ---
 
-<div class="lang-ko">
+<div class="lang-ko" markdown="1">
 
 # P6-B200(Hopper) 런치 AMI 만들기
 
@@ -267,7 +267,7 @@ rm -f /opt/parallelcluster/system_info
 
 </div>
 
-<div class="lang-en" style="display:none">
+<div class="lang-en" markdown="1" style="display:none">
 
 # Building a Launch AMI for P6-B200 on AWS ParallelCluster
 

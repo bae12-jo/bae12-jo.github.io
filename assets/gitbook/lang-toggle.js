@@ -1,4 +1,3 @@
-// Language toggle with scroll preservation
 (function() {
   function getLang() {
     return localStorage.getItem('preferred-lang') || 'ko';
@@ -9,15 +8,14 @@
   }
 
   function applyLang(lang) {
-    document.querySelectorAll('.lang-ko').forEach(el => {
+    document.querySelectorAll('.lang-ko').forEach(function(el) {
       el.style.display = lang === 'ko' ? '' : 'none';
     });
-    document.querySelectorAll('.lang-en').forEach(el => {
+    document.querySelectorAll('.lang-en').forEach(function(el) {
       el.style.display = lang === 'en' ? '' : 'none';
     });
-    document.querySelectorAll('.lang-toggle-btn').forEach(btn => {
+    document.querySelectorAll('.lang-toggle-btn').forEach(function(btn) {
       btn.textContent = lang === 'ko' ? 'EN' : '한';
-      btn.setAttribute('data-lang', lang);
     });
   }
 
@@ -31,22 +29,34 @@
   }
 
   function injectButton() {
-    // Only inject on pages that have lang-ko/lang-en blocks
     if (!document.querySelector('.lang-ko, .lang-en')) return;
 
-    var toolbar = document.querySelector('.book-header .pull-right');
-    if (!toolbar) return;
+    var header = document.querySelector('.book-header');
+    if (!header) return;
 
     var btn = document.createElement('a');
     btn.className = 'lang-toggle-btn';
     btn.href = '#';
-    btn.style.cssText = 'padding: 0 8px; font-size: 13px; font-weight: bold; line-height: 50px; display: inline-block; color: inherit; text-decoration: none;';
+    btn.style.cssText = [
+      'position:absolute',
+      'right:16px',
+      'top:0',
+      'line-height:50px',
+      'padding:0 12px',
+      'font-size:13px',
+      'font-weight:bold',
+      'color:inherit',
+      'text-decoration:none',
+      'z-index:10'
+    ].join(';');
+
     btn.addEventListener('click', function(e) {
       e.preventDefault();
       toggleLang();
     });
 
-    toolbar.insertBefore(btn, toolbar.firstChild);
+    header.style.position = 'relative';
+    header.appendChild(btn);
   }
 
   document.addEventListener('DOMContentLoaded', function() {
