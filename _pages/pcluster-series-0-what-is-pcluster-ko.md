@@ -21,7 +21,7 @@ pip install aws-parallelcluster==3.15.0
 pcluster create-cluster --cluster-configuration config.yaml
 ```
 
-이 명령어를 실행하기 전에 기반 인프라가 먼저 존재해야 합니다. VPC, 서브넷, 라우팅, 보안 그룹, FSx Lustre, IAM 역할, VPC 엔드포인트, 이 중 어느 것도 pcluster가 직접 만들어주지 않습니다. 이 설정에서는 별도의 CloudFormation 스택으로 먼저 배포하고, pcluster 설정 파일이 그 스택의 출력값(서브넷 ID, FSx 파일시스템 ID, 보안 그룹 ID)을 참조하는 방식을 씁니다.
+이 명령어를 실행하기 전에 기반 인프라가 먼저 존재해야 합니다. VPC, 서브넷, 라우팅, 보안 그룹, FSx Lustre, IAM 역할, VPC 엔드포인트, 이 중 어느 것도 pcluster가 직접 만들어주지 않습니다. 이 설정에서는 별도의 CloudFormation 스택으로 먼저 배포하고, pcluster 설정 파일이 그 스택의 출력값(서브넷 ID, FSx 파일시스템 ID, 보안 그룹 ID)을 참조하는 방식을 씁니다. 설정값은 [이 레포](https://github.com/bae12-jo/parallelcluster-for-llm-training)를 참고하세요.
 
 ---
 

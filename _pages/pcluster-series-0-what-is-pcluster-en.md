@@ -21,7 +21,7 @@ pip install aws-parallelcluster==3.15.0
 pcluster create-cluster --cluster-configuration config.yaml
 ```
 
-Before you run this, the underlying infrastructure needs to exist. VPC, subnets, routing, security groups, FSx Lustre, IAM roles, and VPC endpoints are all prerequisites. None of these are created by pcluster itself. In this setup we deploy them as a separate CloudFormation stack first, then point the pcluster config at the outputs (subnet IDs, FSx filesystem ID, security group IDs).
+Before you run this, the underlying infrastructure needs to exist. VPC, subnets, routing, security groups, FSx Lustre, IAM roles, and VPC endpoints are all prerequisites. None of these are created by pcluster itself. In this setup we deploy them as a separate CloudFormation stack first, then point the pcluster config at the outputs (subnet IDs, FSx filesystem ID, security group IDs). See [this repo](https://github.com/bae12-jo/parallelcluster-for-llm-training) for reference configurations.
 
 ---
 
