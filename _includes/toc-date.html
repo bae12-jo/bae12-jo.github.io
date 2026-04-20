@@ -59,7 +59,6 @@
                                 {% assign has_children = false %}
                                 {% if children.size > 0 %}{% assign has_children = true %}{% endif %}
 
-                                {% comment %} Mark parent active if current page is this post or one of its children {% endcomment %}
                                 {% assign is_active = false %}
                                 {% if page.url == post.url %}{% assign is_active = true %}{% endif %}
                                 {% for child in children %}
@@ -76,20 +75,17 @@
                                     </a>
 
                                     {% if has_children %}
-                                        {% comment %}
-                                            Page has child posts: show in-page TOC anchors first (when active),
-                                            then child page links — all inside one <ul class="articles"> so
-                                            gitbook CSS handles them as a single expandable group.
-                                        {% endcomment %}
                                         <ul class="articles">
                                             {% if site.toc.enabled and page.url == post.url %}
                                                 {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
                                             {% endif %}
                                             {% for child in children %}
+                                                {% comment %} inherit parent lang so filterSidebar hides/shows correctly {% endcomment %}
+                                                {% assign child_lang = child.lang | default: post.lang %}
                                                 {% if page.url == child.url %}
-                                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child_lang %}data-lang="{{child_lang}}"{% endif %}>
                                                 {% else %}
-                                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child_lang %}data-lang="{{child_lang}}"{% endif %}>
                                                 {% endif %}
                                                     <a href="{{site.baseurl}}{{child.url}}" onclick="pageScrollToTop(this)">
                                                         {{ child.title | escape }}
@@ -101,7 +97,6 @@
                                             {% endfor %}
                                         </ul>
                                     {% else %}
-                                        {% comment %} No child posts: show in-page TOC anchors normally {% endcomment %}
                                         {% if site.toc.enabled and page.url == post.url %}
                                             {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
                                         {% endif %}
