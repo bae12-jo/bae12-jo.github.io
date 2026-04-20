@@ -18,6 +18,7 @@ remote_theme: sighingnow/jekyll-gitbook
 
 toc:
   enabled: true
+  enabled_index: false
   h_min:   1
   h_max:   3
 
@@ -80,3 +81,4 @@ linkedin_username: csbailey  # LinkedIn username from URL: linkedin.com/in/YOUR-
 
 extra_header_js:
   - assets/gitbook/lang-toggle.js
+  - assets/gitbook/scroll-sync.js
