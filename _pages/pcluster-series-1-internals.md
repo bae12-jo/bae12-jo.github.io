@@ -1,5 +1,5 @@
 ---
-title: "Distributed Training - Part 1: How AWS ParallelCluster Works Under the Hood"
+title: "Distributed Training - Part 2: How AWS ParallelCluster Works Under the Hood"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
@@ -8,275 +8,210 @@ lang_peer: /pages/pcluster-series-1-internals-ko/
 
 # How AWS ParallelCluster Actually Works Under the Hood
 
-> **Series**: Distributed Training on AWS ParallelCluster
-> **Part 1 of 3** — [Part 2: Why Your p6-b200 Nodes Keep Rebooting →](/pages/pcluster-series-2-reboots/)
+> **Series**: Setting Up a GPU Cluster for Distributed Training
+>
+> [← Part 1: What Kind of Service Is ParallelCluster?](/pages/pcluster-series-0-what-is-pcluster-en/) | [Part 3: Why Your p6-b200 Nodes Keep Rebooting →](/pages/pcluster-series-2-reboots/)
 
-When you run `pcluster create-cluster`, something remarkable happens. Most ML engineers think of ParallelCluster as a simple wrapper around CloudFormation and EC2. But the reality is far more nuanced. There's an entire orchestration layer — Chef cookbooks, custom daemons, cloud-init phases, and timing-critical operations — that runs silently in the background. Understanding this matters because **the same AMI and scripts behave completely differently on a standalone EC2 instance than they do inside a ParallelCluster**.
-
-This post walks through that hidden machinery. I'll show you what actually happens when you create a cluster, why certain configurations fail without explanation, and why your GPU setup might work locally but fail in production.
+When you run `pcluster create-cluster`, something happens that most ML engineers don't expect. The same AMI and the same scripts behave completely differently on a standalone EC2 instance than they do inside a ParallelCluster. This post explains why.
 
 ---
 
-## The Creation Sequence: From `pcluster create-cluster` to Running `slurmd`
-
-Here's the step-by-step choreography that happens when ParallelCluster boots a node:
+## What actually happens from create-cluster to slurmd
 
 ```
 pcluster create-cluster
     ↓
-CloudFormation creates stack (HeadNode, ComputeNodes, VPC, security groups)
+CloudFormation creates the stack (HeadNode, ComputeNodes, VPC, security groups)
     ↓
-EC2 launches instance with pcluster-specific AMI
+EC2 launches instance with pcluster AMI
     ↓
-cloud-init phase 1: Runs UserData script
+cloud-init phase 1: runs UserData
     ↓
-cloud-init phase 2: Runs cinc (Chef) bootstrap
+cloud-init phase 2: runs cinc (Chef) bootstrap
     ↓
-cinc executes pcluster cookbooks (nvidia_config.rb, slurm_install.rb, efa_driver.rb, etc.)
+cinc executes pcluster cookbooks (nvidia_config.rb, slurm_install.rb, efa_driver.rb, ...)
     ↓
-Reboot (if /var/run/reboot-required detected)
+reboot (if /var/run/reboot-required is present)
     ↓
-CustomActions run (OnNodeConfigured phase)
+OnNodeConfigured runs
     ↓
-cfn-signal sends completion signal to CloudFormation
+cfn-signal sent to CloudFormation
     ↓
-slurmd starts on ComputeNodes
-slurmctld starts on HeadNode
+slurmd starts on compute nodes / slurmctld on HeadNode
     ↓
-clustermgtd (pcluster daemon) detects nodes and marks them as idle
+clustermgtd detects nodes and marks them idle
 ```
 
-Each of these steps is critical. If any step fails or hangs, the entire cluster creation hangs indefinitely.
+If any step fails or hangs, the whole cluster creation stalls.
 
 ---
 
-## The cinc (Chef) Bootstrap: Your Real Configuration Engine
+## cinc: the actual configuration engine
 
-ParallelCluster doesn't use arbitrary scripts for system configuration — it uses **cinc** (a Chef Infra Client fork) to run orchestrated cookbooks. This happens automatically after cloud-init and before CustomActions.
+ParallelCluster doesn't use arbitrary scripts to configure nodes — it uses **cinc** (a Chef Infra Client fork) that runs a fixed set of cookbooks. This happens automatically after cloud-init, before your CustomActions get a turn.
 
-Here's what cinc does on each node:
-
-### nvidia_config.rb Cookbook
-
-This is the heavy hitter for GPU nodes. It runs in strict order:
+On GPU nodes, the relevant cookbook is `nvidia_config.rb`, which runs in strict order:
 
 ```ruby
 gdrcopy :configure
-  # Loads the gdrdrv kernel module
-  # Enables GPU Direct RDMA (required for NVLink, EFA, fabric manager)
+  # loads gdrdrv kernel module
+  # enables GPU Direct RDMA (needed for NVLink, EFA, fabric manager)
 
 fabric_manager :configure
-  # Starts nvidia-fabricmanager
-  # Critical: If already running → no-op ✅
-  # If masked (systemctl mask) → ALWAYS FAILS ❌
+  # starts nvidia-fabricmanager
+  # if already running → no-op
+  # if masked (systemctl mask) → always fails with exit code 1
 
 run_nvidiasmi
-  # Validates GPU discovery
-  # If this fails, GPUs aren't visible to Slurm
+  # validates GPU discovery
+  # if this fails, GPUs won't be visible to Slurm
 
 efa_driver :setup
-  # Installs Elastic Fabric Adapter drivers
-
 slurm_install :configure
-  # Installs Slurm, generates slurm.conf
 ```
 
-Then, after all cookbooks complete:
+After all cookbooks finish, cinc runs a finalize phase:
 
 ```
-cinc finalize phase:
-  1. Check /var/run/reboot-required
-     → If file exists: reboot immediately
-  2. After reboot: Mount FSx Lustre
+cinc finalize:
+  1. check /var/run/reboot-required
+     → if the file exists: reboot
+  2. mount FSx Lustre
 ```
 
 > ##### WARNING
 >
-> If your custom AMI installs anything that sets `/var/run/reboot-required`, cinc finalize will reboot your node and your CustomActions won't run. This is the most common source of phantom reboots on GPU clusters.
+> If anything your custom AMI installs writes `/var/run/reboot-required`, cinc finalize will reboot the node before your OnNodeConfigured script runs. This is the most common source of phantom reboots on GPU clusters — and it looks like a timeout, not a reboot trigger.
 {: .block-warning }
 
 ---
 
-## CustomActions Timing: The Critical Detail
-
-ParallelCluster has two CustomActions entry points, and **the timing is not intuitive**:
+## OnNodeStart vs OnNodeConfigured: the timing is not obvious
 
 ```
 cloud-init (UserData) finishes
     ↓
-cinc (Chef) starts
+cinc starts
     ↓
-OnNodeStart triggers  ← RUNS HERE (BEFORE cinc finishes!)
+OnNodeStart runs  ← BEFORE cinc finishes
     ↓
 cinc continues and finishes
     ↓
 cfn-signal checkpoint
     ↓
-OnNodeConfigured triggers  ← RUNS HERE (AFTER cinc finishes)
+OnNodeConfigured runs  ← AFTER cinc finishes
     ↓
 slurmd starts
 ```
 
-> ##### TIP
->
-> If your OnNodeStart script tries to run `nvidia-smi`, it will fail — GDRcopy, fabric_manager, and NVIDIA drivers haven't been loaded yet. Put all GPU validation in **OnNodeConfigured**, not OnNodeStart.
-{: .block-tip }
-
-Real example from p6-b200 setup:
+OnNodeStart runs *before* cinc has loaded GPU drivers, GDRcopy, or fabric manager. If you put `nvidia-smi` in OnNodeStart, it will fail or hang. GPU validation belongs in OnNodeConfigured.
 
 ```yaml
-# cluster-config-p6b200.yaml
+# correct placement
 OnNodeStart: |
   #!/bin/bash
-  # ❌ DON'T do GPU validation here — nvidia-smi will hang or fail
+  # kernel module prep, reboot flag cleanup — no nvidia-smi here
 
 OnNodeConfigured: |
   #!/bin/bash
-  # ✅ DO validate GPU state here
-  nvidia-smi
+  nvidia-smi           # safe here — cinc has finished
   nvidia-fabricmanager -n
 ```
 
 ---
 
-## The Slurm Management Stack: A Hidden Orchestra
+## The daemon stack you didn't know was running
 
-ParallelCluster doesn't just install Slurm — it creates an entire daemon ecosystem:
+ParallelCluster doesn't just install Slurm. It creates a set of daemons that interact with each other in ways that cause surprising behavior:
 
 ```
 HeadNode:
-  slurmctld (Slurm controller)
+  slurmctld
     ↓ publishes node state
 
   clustermgtd (pcluster daemon, runs as root)
-    ↓ monitors slurmctld
-    ↓ detects nodes marked DOWN
-    ↓ triggers RebootProgram=/sbin/reboot (static nodes)
-    ↓ or terminates (dynamic nodes)
+    ↓ watches slurmctld for DOWN nodes
+    ↓ triggers /sbin/reboot on static nodes that go DOWN
+    ↓ terminates dynamic nodes
 
 ComputeNode:
-  slurmd (Slurm node agent)
+  slurmd
     ↓ sends heartbeat to slurmctld every SlurmdTimeout seconds
-    ↓ if heartbeat fails: marked DOWN
+    ↓ if heartbeat fails: marked DOWN by slurmctld
 
-cfn-hup (CloudFormation monitor)
+cfn-hup (CloudFormation monitor, HeadNode)
   ↓ watches for stack updates
   ↓ on change: restarts slurmctld
-  ↓ slurmctld reload regenerates conf hash
-  ↓ all nodes see conf hash mismatch
-  ↓ Slurm marks all nodes DOWN
-  ↓ clustermgtd detects DOWN → reboots all nodes
+  ↓ slurmctld restart regenerates slurm.conf, new conf hash
+  ↓ compute nodes have old hash → slurmctld marks them DOWN
+  ↓ clustermgtd sees DOWN → reboots all nodes
 ```
+
+That last chain is a cascade that happens automatically whenever you update the cluster. During development, add `DebugFlags=NO_CONF_HASH` to `CustomSlurmSettings` to prevent it.
 
 > ##### DANGER
 >
-> The cfn-hup loop above is a **node replacement cascade**. It happens automatically whenever you update a cluster. To prevent it, add `DebugFlags: NO_CONF_HASH` to your CustomSlurmSettings during development.
+> Every CloudFormation stack update triggers this cascade by default. Without `NO_CONF_HASH`, any config change during active jobs will kill those jobs.
 {: .block-danger }
 
 ---
 
-## Static vs Dynamic Nodes: The Scaling Model
+## Static vs dynamic nodes
 
-### Static Nodes (MinCount > 0)
+**Static nodes** (`MinCount > 0`) are always running. When they go DOWN, clustermgtd reboots them — they recover in 2–5 minutes. For p6-b200 with Capacity Block reservations, static is almost always the right choice. Dynamic node launch takes 8–15 minutes and loses your CB slot on termination.
 
-```
-State: running (always on)
-If marked DOWN:
-  → clustermgtd triggers reboot
-  → node comes back in 2-5 minutes
-```
+**Dynamic nodes** (`MinCount = 0`) only exist when jobs are queued. After `SuspendTime` seconds idle, the instance terminates. The next job triggers a full cloud-init + cinc bootstrap from scratch.
 
-### Dynamic Nodes (MinCount = 0)
-
-```
-State: running (only when jobs are queued)
-If idle for SuspendTime seconds:
-  → instance terminates
-On next job:
-  → new instance launched
-  → cloud-init + cinc bootstrap (~8-15 minutes)
-```
-
-> ##### TIP
->
-> For GPU clusters like p6-b200, **static nodes are almost always better**. Dynamic node launch takes 8-15 minutes including cloud-init + cinc. Set `MinCount: 1` and `SuspendTime: 36000` to keep nodes warm.
-{: .block-tip }
-
----
-
-## Timeout Parameters: The Invisible Tuning Knobs
-
-| Parameter | Default | What It Does | p6-b200 Recommended |
-|-----------|---------|--------------|-------------------|
-| `SlurmdTimeout` | 300s | Heartbeat timeout before node goes DOWN | 300s |
-| `ComputeNodeBootstrapTimeout` | 1800s | Max time for cloud-init + cinc | 3600s |
-| `KillWait` | 30s | Grace period after job cancellation | 60s |
-| `SuspendTime` | 300s | Idle time before dynamic node terminates | 36000s |
+Set `SuspendTime: 36000` on GPU clusters. The default of 300 seconds will constantly terminate and re-bootstrap nodes, and if you have a CB reservation, you may not get the slot back.
 
 > ##### DANGER
 >
-> Never set `SuspendTime: 0` or `ScaledownIdletime: 0` on p6-b200. This triggers immediate suspension of idle static nodes, which causes `ReservationCapacityExceeded` on restart and a DOWN loop.
+> `SuspendTime: 0` or `ScaledownIdletime: 0` on p6-b200 = immediate slot release on idle. The node terminates, the CB slot is gone, and the next launch fails with `ReservationCapacityExceeded`. Don't do it.
 {: .block-danger }
 
 ---
 
-## Why Standalone EC2 Tests Are Misleading
+## Timeout parameters worth knowing
 
-```
-Standalone EC2 Instance (pcluster AMI)
-  ↓ cinc is NOT installed
-  ↓ No Chef cookbooks run
-  ↓ nvidia drivers NOT loaded by cinc
-  ↓ fabric_manager startup timing is different
-  ↓ No slurmd context
+| Parameter | Default | What triggers it |
+|-----------|---------|-----------------|
+| `ComputeNodeBootstrapTimeout` | 1800s | cfn-signal must arrive within this window |
+| `SlurmdTimeout` | 300s | heartbeat timeout before node goes DOWN |
+| `SuspendTime` | 300s | idle seconds before dynamic node terminates |
 
-Inside ParallelCluster
-  ↓ cinc bootstraps and runs nvidia_config.rb
-  ↓ fabric_manager starts during cinc
-  ↓ Slurm installed before CustomActions
-  ↓ Your scripts run with full slurmd context
-```
-
-> ##### WARNING
->
-> Standalone tests pass, cluster tests fail — this is the pattern. Fabric manager timing is different. GDRcopy loads at a different point. If your script validates fabric_manager in OnNodeStart, it succeeds standalone but fails in ParallelCluster.
-{: .block-warning }
+On p6-b200, set `ComputeNodeBootstrapTimeout: 3600`. The cinc bootstrap alone takes 15–25 minutes.
 
 ---
 
-## Debugging in Production
+## Why standalone tests pass but cluster tests fail
+
+A standalone EC2 instance (even with the same pcluster AMI) doesn't run cinc. Chef cookbooks don't execute. nvidia drivers aren't loaded by cinc. There's no slurmd heartbeat, no clustermgtd watching for DOWN states, no cfn-hup restarting services.
+
+Every failure mode in Part 3 requires ParallelCluster's internal orchestration to trigger. If your script works on a standalone instance and breaks in the cluster, look at what cinc does in between.
+
+---
+
+## Debugging reference
 
 ```bash
-# On HeadNode
-tail -f /var/log/slurmctld.log         # Node state changes
+# HeadNode
+tail -f /var/log/slurmctld.log         # node state changes, DOWN reasons
 tail -f /var/log/slurm_elastic.log     # clustermgtd decisions
 systemctl status cfn-hup               # CloudFormation monitor running?
 
-# On ComputeNode
-tail -f /var/log/slurmd.log            # Heartbeat, job launch
+# ComputeNode
+tail -f /var/log/slurmd.log            # heartbeat, job launch
 nvidia-smi                             # GPU visible?
-ls -la /var/run/reboot-required        # Pending reboot?
+ls /var/run/reboot-required            # pending reboot flag?
 
 # Slurm state
-sinfo                                  # Node state overview
-scontrol show nodes                    # Detailed node config
+sinfo -N                               # node state per node
+scontrol show node <nodename>          # full node details including reason
 ```
 
 ---
 
-## Key Lessons
-
-1. **OnNodeStart runs before cinc finishes** — no GPU validation here
-2. **Never change pcluster-managed EC2 tags** — triggers node replacement
-3. **`/var/run/reboot-required` = silent reboot** — cinc finalize will catch it
-4. **Fabric manager is binary** — running or not, no graceful degradation
-5. **`cfn-hup` is a footgun** — every CloudFormation update triggers conf hash cascade
-6. **Static nodes need `SuspendTime >> 0`** — zero is a fast path to DOWN loops
-
----
-
-> **Series**: Distributed Training on AWS ParallelCluster
+> **Series**: Setting Up a GPU Cluster for Distributed Training
 >
-> ← You are here: **Part 1: How ParallelCluster Works**
-> [Part 2: Why Your p6-b200 Nodes Keep Rebooting →](/pages/pcluster-series-2-reboots/)
+> [← Part 1: What Kind of Service Is ParallelCluster?](/pages/pcluster-series-0-what-is-pcluster-en/) | You are here: **Part 2: How ParallelCluster Works** | [Part 3: Why Your p6-b200 Nodes Keep Rebooting →](/pages/pcluster-series-2-reboots/)
 {: .block-tip }

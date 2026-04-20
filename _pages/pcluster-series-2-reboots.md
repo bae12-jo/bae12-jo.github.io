@@ -1,5 +1,5 @@
 ---
-title: "Distributed Training - Part 2: Why Your p6-b200 Nodes Keep Rebooting"
+title: "Distributed Training - Part 3: Why Your p6-b200 Nodes Keep Rebooting"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
@@ -8,77 +8,67 @@ lang_peer: /pages/pcluster-series-2-reboots-ko/
 
 # Why Your p6-b200 Compute Nodes Keep Rebooting on AWS ParallelCluster
 
-> **Series**: Distributed Training on AWS ParallelCluster
+> **Series**: Setting Up a GPU Cluster for Distributed Training
 >
-> [← Part 1: How ParallelCluster Works](/pages/pcluster-series-1-internals/) | [Part 3: Building a Custom AMI →](/pages/pcluster-series-3-custom-ami/)
+> [← Part 2: How ParallelCluster Works](/pages/pcluster-series-1-internals/) | [Part 4: Building a Custom AMI →](/pages/pcluster-series-3-custom-ami/)
 
-You've provisioned a p6-b200.48xlarge cluster on AWS ParallelCluster, doubled your timeouts, disabled health checks, and your nodes still die. Some reboot at exactly 68 seconds. Others make it to 7 minutes then vanish. A few boot completely then restart in a loop. You're here because the obvious things didn't work.
+You've provisioned a p6-b200.48xlarge cluster, doubled the timeouts, disabled health checks, and the nodes still die. Some reboot at exactly 68 seconds. Others make it to 7 minutes then vanish. A few boot completely then restart in a loop. The obvious things didn't work.
 
-This post walks through the four root causes I found debugging a production p6-b200 cluster — each one masquerading as something else, each one hiding behind a different error message at a different point in the bootstrap sequence.
+There are four distinct root causes. Each appears at a different time, produces a different error, and looks like something else.
 
 ---
 
-## Cause 1: Node Dies at ~68 Seconds — `ib_umad` Missing
+## Cause 1: Node dies at ~68 seconds — `ib_umad` missing
 
-**Symptom**: Node boots, kernel loads, systemd starts services. At exactly 68 seconds, the instance shuts down. CloudFormation reports failure during `nvidia_config`. No useful logs.
+**Symptom**: The node boots, kernel loads, systemd starts services. At 68 seconds the instance shuts down. CloudFormation reports failure during `nvidia_config`. No useful logs on the node.
 
-**What we tried that didn't work**:
-- Increasing `ComputeNodeBootstrapTimeout` to 3600s — node still dies at 68s
-- `systemctl disable nvidia-fabricmanager` — no effect
-- Running `nvidia-smi` standalone — works perfectly
+Increasing `ComputeNodeBootstrapTimeout` doesn't help. `systemctl disable nvidia-fabricmanager` doesn't help. `nvidia-smi` works fine on a standalone instance.
 
-**The actual cause**: The `nvidia-fabricmanager` service starts during cinc's `fabric_manager :configure` phase. It has an internal precheck that polls `/sys/class/infiniband` for 60 seconds looking for IB devices. Without the `ib_umad` kernel module loaded, no devices appear. After 60 seconds of silence, fabricmanager detects a "Pre-NVL5 system" — meaning it thinks it's running on hardware older than NVLink 5. On a p6-b200 with GB100 GPUs, this triggers a kernel panic.
+**What's actually happening**: During cinc's `fabric_manager :configure` phase, `nvidia-fabricmanager` starts. It has an internal precheck that polls `/sys/class/infiniband` for 60 seconds looking for IB devices. Without the `ib_umad` kernel module loaded, no devices appear. After 60 seconds, fabricmanager concludes it's running on a "Pre-NVL5 system" — and on p6-b200 with GB100 GPUs, this triggers a kernel panic.
 
 ```
-[   68.245821] nvidia-fabricmanager-start.sh: No devices found in /sys/class/infiniband within 60 seconds
+[   68.245821] No devices found in /sys/class/infiniband within 60 seconds
 [   68.452104] Detected Pre-NVL5 system, initializing without NVSwitch fabric support
-[   68.623018] NVRM: _knvlinkCheckFabricCliqueId: GPU 0 failed to get fabric clique Id: 0x55
+[   68.623018] NVRM: _knvlinkCheckFabricCliqueId: GPU 0 failed to get fabric clique Id
 [   68.901234] Kernel panic - not syncing: GPU fabric initialization failed
 ```
 
-The 68-second timing is so precise it looks like a timeout — but it's actually the fabricmanager precheck threshold (60s poll + ~8s overhead).
+The 68-second timing looks like a timeout. It is — but it's fabricmanager's internal precheck threshold (60s poll + ~8s overhead), not the bootstrap timeout.
+
+`ib_umad` has to be loaded *before* cinc starts. `modprobe ib_umad` in OnNodeStart is too late — cinc has already launched fabricmanager by then. The module needs to be in `/etc/modules` so it loads at boot.
 
 > ##### TIP
 >
-> `ib_umad` must be **loaded before cinc starts**. `modprobe ib_umad` in OnNodeStart is too late — cinc has already started fabric_manager. The module must be baked into the AMI via `/etc/modules`.
+> The fix goes in the AMI, not in a hook script. Any script-based fix runs after cinc has already tried and failed to start fabricmanager.
 {: .block-tip }
-
-**The fix**:
 
 ```bash
 apt install -y linux-modules-extra-$(uname -r) infiniband-diags ibutils
 modprobe ib_umad
-echo "ib_umad" >> /etc/modules   # ← persists across reboots
+echo "ib_umad" >> /etc/modules
 ```
-
-**Verification**: `lsmod | grep ib_umad` should show the module loaded at boot.
 
 ---
 
-## Cause 2: Node Reboots at ~7 Minutes — The `reboot-required` Trap
+## Cause 2: Node reboots ~7 minutes after cfn-signal success
 
-**Symptom**: Node launches, cfn-signal reports success, Slurm marks the node IDLE. You submit a job. Seven minutes later — gone. No error in the job log. The node comes back up and boots again.
+**Symptom**: The node launches, cfn-signal reports success, Slurm marks it IDLE. You submit a job. Seven minutes later the node is gone. No error in the job log. It comes back up and boots again.
 
-**What we tried that didn't work**:
-- Masking `unattended-upgrades` — doesn't prevent the reboot
-- Removing `needrestart` — doesn't help
-- Adding `OnNodeConfigured` hooks to clear reboot flags — fires too late
+Masking `unattended-upgrades` doesn't help. Removing `needrestart` doesn't help. Adding a hook to OnNodeConfigured to clear reboot flags fires too late.
 
-**The actual cause**: During cinc's init phase, it installs packages — including `linux-modules-extra-$(uname -r)`. On our cluster, this triggered a kernel minor version upgrade from `6.8.0-1050-aws` to `6.8.0-1052-aws`. When this happens, apt's post-install hooks create `/var/run/reboot-required`. The file is created during cinc init, but cinc finalize runs **after cfn-signal**. In finalize, cinc explicitly checks for this file and calls `reboot`. By the time the node is UP and running jobs, finalize hasn't fired yet.
+**What's actually happening**: During cinc's init phase, it installs packages — including `linux-modules-extra-$(uname -r)`. On our cluster this triggered a kernel minor version upgrade from `6.8.0-1050-aws` to `6.8.0-1052-aws`. When that happens, apt's post-install hooks create `/var/run/reboot-required`. The file is created during cinc init, but cinc finalize runs *after* cfn-signal. In finalize, cinc explicitly checks for this file and calls `reboot`. By the time the node is IDLE and running jobs, finalize hasn't fired yet — it fires 5–7 minutes later.
 
 ```
-cinc finalize log:
-  [INFO] Running: package[linux-modules-extra-6.8.0-1052-aws]   ← triggers reboot flag
+cinc finalize:
+  [INFO] package[linux-modules-extra-6.8.0-1052-aws]   ← creates reboot flag
   [INFO] /var/run/reboot-required: exists
-  [INFO] Executing: /sbin/reboot   ← 7 minutes after cfn-signal
+  [INFO] Executing: /sbin/reboot                       ← 7 minutes after cfn-signal
 ```
 
 > ##### WARNING
 >
-> `needrestart` removal and `unattended-upgrades` masking are not enough. **cinc itself** installs packages and creates the reboot flag — the only reliable fix is a dpkg post-invoke hook that deletes the file immediately after any package install.
+> `needrestart` removal and `unattended-upgrades` masking don't touch this. cinc itself installs packages and creates the flag. The only way to stop it is a dpkg post-invoke hook that deletes the file immediately after any package install.
 {: .block-warning }
-
-**The fix**:
 
 ```bash
 cat > /etc/apt/apt.conf.d/99-no-reboot-required <<'EOF'
@@ -86,120 +76,90 @@ DPkg::Post-Invoke { "rm -f /var/run/reboot-required /var/run/reboot-required.pkg
 EOF
 ```
 
-This runs after every package install (including during cinc) and immediately deletes the reboot marker.
-
-**Why the 7-minute timing**: cfn-signal fires when slurmd registers. cinc finalize runs afterward, typically 5–7 minutes later on p6-b200 due to the FSx mount and additional config steps.
+This runs after every package install, including ones cinc triggers, and deletes the flag before cinc finalize can read it.
 
 ---
 
-## Cause 3: cinc `:start` Always Fails — Fabricmanager Masked in AMI
+## Cause 3: cinc fails before cfn-signal — fabricmanager masked in AMI
 
-**Symptom**: Node fails during cinc, before cfn-signal. The error in cinc.log: `service[nvidia-fabricmanager] (aws-parallelcluster-entrypoints::nvidia_config line 45) had an error: expected '0' but got '1'`. Timing is ~3 minutes (cinc timeout), not 68 seconds.
+**Symptom**: Node fails during cinc, around 3 minutes in, before cfn-signal ever fires. The cinc log shows: `service[nvidia-fabricmanager] had an error: expected '0' but got '1'`.
 
-**What we tried that didn't work**:
-- Thinking `systemctl disable` and `systemctl mask` behave the same — they don't
-- Unmasking the service in OnNodeConfigured — too late, cinc already failed
+**What's actually happening**: `systemctl mask` creates a symlink pointing the unit file at `/dev/null`. When cinc's `fabric_manager :configure` recipe calls `systemctl start`, a masked service always returns exit code 1. cinc sees the error, marks the recipe FATAL, and the bootstrap fails.
 
-**The actual cause**: When you `systemctl mask` a service, a symlink points the unit file to `/dev/null`. When cinc's `fabric_manager :configure` recipe runs `systemctl start`, it always returns exit code 1 on a masked service. cinc sees the error, marks the recipe FATAL, and the node fails bootstrap.
+| state | cinc `start` behavior |
+|---|---|
+| `enabled` | no-op if already running |
+| `disabled` | attempts start |
+| `masked` | always returns exit code 1 |
 
 > ##### DANGER
 >
-> `systemctl mask nvidia-fabricmanager` in your AMI = **always FATAL during cinc**. There is no workaround — the service must be in `enabled` or `disabled` state at AMI bake time.
+> There is no workaround for a masked service. AMI must have fabricmanager in `enabled` or `disabled` state at bake time. `masked` means every bootstrap attempt fails.
 {: .block-danger }
 
-The behavior by state:
-
-| systemctl state | cinc `start` behavior |
-|---|---|
-| `enabled` | If already running → no-op ✅ |
-| `disabled` | Starts the service → success or failure |
-| `masked` | **Always returns error code 1 — always FATAL** ❌ |
-
-**The fix**:
-
 ```bash
-# ✅ Correct
+# correct
 systemctl enable nvidia-fabricmanager
 
-# ❌ Never do this in an AMI
+# do not do this in an AMI
 systemctl mask nvidia-fabricmanager
 ```
 
 ---
 
-## Cause 4: Conf Hash Reboot Loop — The `cfn-hup` Trap
+## Cause 4: Conf hash reboot loop — cfn-hup
 
-**Symptom**: Cluster is stable, jobs are running. You update the CloudFormation stack. Suddenly, nodes go DOWN one by one. slurmctld log shows: `Node compute-node-1: appears to have a different slurm.conf hash`. The node recovers to IDLE, then immediately goes DOWN again. The loop repeats every few minutes indefinitely.
+**Symptom**: Cluster is stable, jobs running. You update the CloudFormation stack. Nodes start going DOWN one by one. slurmctld logs show: `appears to have a different slurm.conf hash`. Each node recovers to IDLE, then goes DOWN again minutes later. The loop doesn't stop.
 
-**What we tried that didn't work**:
-- Restarting slurmctld manually — loop continues
-- Updating slurm.conf on all nodes — hashes keep drifting
-- Increasing `SlurmdTimeout` — doesn't stop the DOWN state
+Restarting slurmctld manually doesn't help. The hashes keep drifting.
 
-**The actual cause**: When you update the CloudFormation stack, cfn-hup (running on the HeadNode) detects the change and restarts slurmctld. Each restart regenerates slurm.conf and computes a new hash. It broadcasts this hash to ComputeNodes. If a node's hash doesn't match, slurmctld marks it DOWN. clustermgtd sees DOWN → triggers `/sbin/reboot`. Node reboots, syncs new conf, goes IDLE, heartbeats — but if cfn-hup fires again, the cycle repeats.
+**What's actually happening**: When you update the CF stack, cfn-hup (running on HeadNode) detects the change and restarts slurmctld. Each restart regenerates slurm.conf and produces a new hash. Compute nodes have the old hash. slurmctld marks them DOWN. clustermgtd sees DOWN and triggers `/sbin/reboot`. Nodes reboot, sync the new hash, go IDLE — then cfn-hup fires again.
 
 ```
 T+0s    CloudFormation stack update
-T+5s    cfn-hup fires → restarts slurmctld
-T+10s   slurmctld regenerates slurm.conf, new hash = HASH_V2
-T+20s   compute-node-1 still has HASH_V1 → reports mismatch
-T+25s   slurmctld marks compute-node-1 DOWN
-T+30s   clustermgtd sees DOWN → /sbin/reboot
+T+5s    cfn-hup fires → slurmctld restarts
+T+10s   slurmctld: new conf, new hash HASH_V2
+T+20s   compute node still has HASH_V1 → mismatch
+T+25s   slurmctld marks node DOWN
+T+30s   clustermgtd → /sbin/reboot
 T+90s   node reboots, gets HASH_V2, goes IDLE
-T+95s   cfn-hup fires again → cycle repeats
+T+95s   cfn-hup fires again → repeat
 ```
 
 > ##### WARNING
 >
-> This loop runs indefinitely and will interrupt long-running jobs silently. A job running for 2 hours gets killed mid-execution the moment you touch the CloudFormation stack.
+> This runs indefinitely and silently kills long-running jobs. Any stack update while jobs are running will interrupt them.
 {: .block-warning }
 
-**The fix** — add to your pcluster cluster config:
-
 ```yaml
+# cluster config
 CustomSlurmSettings:
   - "DebugFlags=NO_CONF_HASH"
 ```
 
-This suppresses conf hash mismatch checks. Safe in a managed CloudFormation environment where you trust the config to be consistent.
+---
+
+## Why standalone EC2 testing doesn't surface any of this
+
+None of these causes exist on a standalone instance. cinc doesn't run. There's no finalize phase checking for reboot flags. No cfn-hup watching the stack. No clustermgtd rebooting DOWN nodes. All four failure modes require ParallelCluster's orchestration layer to trigger.
+
+If your setup works standalone and breaks in the cluster, that gap is where to look.
 
 ---
 
-## Why Standalone EC2 Tests Don't Catch These
+## Quick diagnosis
 
-| Aspect | Standalone EC2 | pcluster Compute Node |
-|---|---|---|
-| cinc | Not running | Runs automatically |
-| Reboot checks | You control | cinc finalize auto-checks |
-| Service state | You manage | cinc enforces `enabled`; masked = failure |
-| Conf hash | No slurmd | slurmctld/slurmd compare on every heartbeat |
-| cfn-hup | Not present | Watches stack, restarts services |
+**Node dies at ~68s?** → `dmesg | grep -i "Pre-NVL5\|kbifCacheVFInfo"` — if you see it, `ib_umad` wasn't loaded before cinc started. Fix: bake it into the AMI via `/etc/modules`.
 
-Every one of these four causes requires ParallelCluster's internal orchestration to trigger. A standalone instance will never hit them. This is why you have to test in a real cluster.
+**Node reboots 5–7 min after cfn-signal success?** → `/var/log/parallelcluster/cinc.log | grep reboot` — if cinc finalize is calling reboot, you have a `reboot-required` flag. Fix: dpkg post-invoke hook in AMI.
+
+**Node fails ~3 min in, before cfn-signal?** → cinc.log for `expected '0' but got '1'` on fabricmanager — service is masked in the AMI. Fix: `systemctl enable`, not `mask`.
+
+**Nodes cycling UP → DOWN repeatedly after a stack update?** → slurmctld.log for `different slurm.conf hash` — cfn-hup conf hash cascade. Fix: `DebugFlags=NO_CONF_HASH`.
 
 ---
 
-## Diagnosis Flowchart
-
-**Node dies at ~68 seconds?**
-- Check `dmesg` for "Detected Pre-NVL5" or "kbifCacheVFInfo" panic
-- **→ Cause 1**: `ib_umad` missing. Bake into AMI.
-
-**Node dies ~5–7 minutes after cfn-signal success?**
-- Check `/var/log/parallelcluster/cinc.log` for "Executing: /sbin/reboot"
-- **→ Cause 2**: `reboot-required` trap. Add dpkg hook to AMI.
-
-**Node fails during cinc, before cfn-signal (~3 min)?**
-- Check cinc.log for `service[nvidia-fabricmanager] had an error: expected '0' but got '1'`
-- **→ Cause 3**: fabricmanager masked. Use `enable`, not `mask`.
-
-**Node cycles UP → DOWN → IDLE → UP repeatedly?**
-- Check slurmctld log for "appears to have a different slurm.conf hash"
-- **→ Cause 4**: conf hash loop. Add `DebugFlags=NO_CONF_HASH`.
-
----
-
-> **Series**: Distributed Training on AWS ParallelCluster
+> **Series**: Setting Up a GPU Cluster for Distributed Training
 >
-> [← Part 1: How ParallelCluster Works](/pages/pcluster-series-1-internals/) | **Part 2: Why Your p6-b200 Nodes Keep Rebooting** | [Part 3: Building a Custom AMI →](/pages/pcluster-series-3-custom-ami/)
+> [← Part 2: How ParallelCluster Works](/pages/pcluster-series-1-internals/) | You are here: **Part 3: Why Your p6-b200 Nodes Keep Rebooting** | [Part 4: Building a Custom AMI →](/pages/pcluster-series-3-custom-ami/)
 {: .block-tip }

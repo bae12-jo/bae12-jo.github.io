@@ -1,306 +1,208 @@
 ---
-title: "분산 학습 - Part 3: p6-b200을 위한 커스텀 AMI 만들기"
+title: "분산 학습 - Part 4: p6-b200을 위한 커스텀 AMI 만들기"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
 lang_peer: /pages/pcluster-series-3-custom-ami/
 ---
 
-# AWS ParallelCluster에서 p6-b200 문제를 해결하는 커스텀 AMI 만들기
+# AWS ParallelCluster p6-b200 문제를 해결하는 커스텀 AMI 만들기
 
-> **시리즈**: AWS ParallelCluster로 분산 학습 환경 구축하기
+> **시리즈**: 분산 학습을 위한 GPU Cluster 세팅하기
 >
-> [← Part 2: p6-b200 노드가 계속 재부팅되는 이유](/pages/pcluster-series-2-reboots-ko/)
+> [← Part 3: p6-b200 노드 재부팅 원인](/pages/pcluster-series-2-reboots-ko/)
 
-Part 2를 읽으셨다면 p6-b200 노드가 계속 재부팅되는 이유를 알 것입니다: 커널 모듈 없음, 마스킹된 서비스, 유령 재부팅 플래그, 커널 버전 불일치. 이 글은 해결책입니다. 네 가지 근본 원인을 커스텀 AMI에 모두 베이크해서 노드가 항상 깨끗하게 부팅되도록 만들겠습니다.
-
----
-
-## 왜 AMI에 수정사항을 베이크해야 하는가?
-
-OnNodeStart와 OnNodeConfigured 스크립트는 마지막 트윅에는 유용하지만, 문제가 근본적인 경우에는 신뢰할 수 없습니다:
-
-- 커널 모듈은 cinc의 NVL5 초기화 **이전에** 존재해야 합니다
-- Systemd 서비스는 cinc가 실행되기 **전에** 언마스킹되어 있어야 합니다
-- OnNodeConfigured에서 reboot 플래그를 제거해도 최종 cfn-signal을 손상시킵니다
-
-> ##### TIP
->
-> 한 번 빌드하고 어디서나 배포하세요. AMI에 수정사항을 베이크하면 모든 노드 교체에서 재현성이 보장되고, 시작 시 apt-get 없이 부트스트랩이 빨라지며, AMI 빌드 중에 — 콘솔 접근이 가능할 때 — 실패가 표면화됩니다.
-{: .block-tip }
+Part 3에서 네 가지 근본 원인을 확인했습니다. 이 글은 수정입니다 — AMI 빌드 시점에 전부 해결합니다.
 
 ---
 
-## 다섯 가지 AMI 체크리스트
+## 왜 스크립트가 아닌 AMI인가
 
-각 항목은 Part 2의 근본 원인 하나를 해결합니다. 순서대로 적용하세요.
+OnNodeStart와 OnNodeConfigured는 cinc 이후에 실행되는 것에는 유용합니다. 문제가 cinc 단계 자체에 있을 때는 통하지 않습니다.
+
+`ib_umad`는 cinc가 시작하기 *전에* 로드되어야 합니다. `nvidia-fabricmanager`는 cinc가 시작하려 하기 *전에* 올바른 상태여야 합니다. `reboot-required` 플래그는 스크립트 레벨이 아닌 dpkg 레벨에서 잡아야 합니다. 이 중 어느 것도 사후 훅 스크립트로 확실하게 고칠 수 없습니다.
 
 ---
 
-### 1. `ib_umad` 영구 로드 (Pre-NVL5 패닉 해결)
+## 다섯 가지 수정
 
-`ib_umad` 커널 모듈은 NVL5 fabric 초기화 이전에 필요합니다. 없으면 노드가 ~68초에 패닉합니다.
+### 1. `ib_umad`를 /etc/modules에
+
+`ib_umad` 없이 부팅하면 fabricmanager가 사전 검사에서 실패하고 노드가 ~68초에 패닉합니다.
 
 ```bash
-sudo apt install -y linux-modules-extra-$(uname -r) infiniband-diags ibutils
-sudo modprobe ib_umad
-echo "ib_umad" | sudo tee -a /etc/modules
+apt install -y linux-modules-extra-$(uname -r) infiniband-diags ibutils
+modprobe ib_umad
+echo "ib_umad" >> /etc/modules
 ```
 
-검증:
+`echo` 줄이 핵심입니다. 없으면 AMI에 모듈이 있어도 클러스터 부팅 시 자동 로드가 안 됩니다.
 
-```bash
-lsmod | grep ib_umad
-# 예상: ib_umad    45056  0
-```
-
-> ##### WARNING
->
-> `echo "ib_umad" >> /etc/modules` 줄이 핵심입니다. 이 줄 없이는 AMI 빌드 시점에는 모듈이 존재하지만, 클러스터에서 노드가 부팅될 때 자동으로 로드되지 않습니다.
-{: .block-warning }
+검증: `lsmod | grep ib_umad`가 `ib_umad    45056  0`을 보여야 합니다.
 
 ---
 
-### 2. `nvlsm` 설치 (NVLink 서브넷 매니저 해결)
+### 2. `nvlsm`
 
-NVIDIA NVLink 서브넷 매니저는 NVL5와 B200 GPU의 fabric 토폴로지를 관리합니다.
+NVIDIA NVLink 서브넷 매니저 — NVL5와 B200의 fabric 토폴로지를 관리합니다.
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/nvlsm_2025.10.11-1_amd64.deb
-sudo dpkg -i nvlsm_2025.10.11-1_amd64.deb
-```
-
-검증:
-
-```bash
-dpkg -l | grep nvlsm
-# 예상: ii  nvlsm  2025.10.11-1  amd64  SM
+dpkg -i nvlsm_2025.10.11-1_amd64.deb
 ```
 
 ---
 
-### 3. `nvidia-fabricmanager` 활성화 (마스킹된 서비스 실패 해결)
+### 3. fabricmanager enable, mask 금지
 
 > ##### DANGER
 >
-> 서비스를 **활성화**하세요, 비활성화하거나 마스킹하지 마세요. AMI에서 fabricmanager가 마스킹되면 cinc가 시작하지 못하고 부트스트랩이 FATAL로 실패합니다. `enabled` + 이미 실행 중 = cinc no-op. `masked` = 항상 FATAL.
+> `enabled` 상태 = cinc의 `:start`가 이미 실행 중이면 no-op. `masked` 상태 = cinc의 `:start`가 항상 exit code 1 반환. AMI의 상태가 이를 결정합니다. 우회 방법이 없습니다.
 {: .block-danger }
 
 ```bash
-sudo systemctl enable nvidia-fabricmanager
-
-# 검증
-sudo systemctl is-enabled nvidia-fabricmanager
-# 예상: enabled
+systemctl enable nvidia-fabricmanager
 ```
 
-AMI 빌드 중 `systemctl start`를 실행하지 마세요. cinc가 시작을 처리합니다.
+AMI 빌드 중 `systemctl start`는 실행하지 마세요. cinc가 처리합니다.
 
 ---
 
-### 4. `reboot-required` 플래그 억제 (유령 재부팅 해결)
+### 4. dpkg 훅으로 reboot-required 억제
 
 ```bash
-sudo tee /etc/apt/apt.conf.d/99-no-reboot-required > /dev/null <<'EOF'
+tee /etc/apt/apt.conf.d/99-no-reboot-required > /dev/null <<'EOF'
 DPkg::Post-Invoke { "rm -f /var/run/reboot-required /var/run/reboot-required.pkgs 2>/dev/null || true"; };
 EOF
+systemctl mask unattended-upgrades
+apt remove --purge needrestart -y
 ```
 
-이 훅은 모든 `apt` 작업 후 실행되어 cinc 자체 패키지 설치 중 생성된 것을 포함한 모든 reboot-required 플래그를 제거합니다.
-
-자동 재부팅 트리거도 비활성화:
-
-```bash
-sudo systemctl mask unattended-upgrades
-sudo apt remove --purge needrestart -y
-```
-
-검증:
-
-```bash
-cat /etc/apt/apt.conf.d/99-no-reboot-required
-```
+모든 `apt` 작업 후 — cinc 중에 발생하는 것도 포함해서 — 실행되어 플래그를 cinc finalize가 읽기 전에 삭제합니다.
 
 ---
 
-### 5. Lustre 클라이언트 모듈 설치 (FSx 마운트 실패 해결)
+### 5. Lustre 클라이언트 모듈 — 마지막에 설치
 
 > ##### WARNING
 >
-> **커널 버전 드리프트는 조용한 킬러입니다.** 직접 경험했습니다: AMI는 커널 `6.8.0-1050-aws`에서 빌드됐지만, cinc 중에 `linux-modules-extra`가 커널을 `6.8.0-1052-aws`로 업그레이드했습니다. `-1050`용 lustre 모듈은 `-1052`에서 로드할 수 없어 `FATAL: lustre[mount fsx] exit code 19 (ENODEV)`가 발생했습니다.
+> AMI를 빌드하는 커널과 노드가 실행되는 커널이 다를 수 있습니다. 우리 클러스터에서 `linux-modules-extra` 설치가 커널을 `6.8.0-1050-aws`에서 `6.8.0-1052-aws`로 업그레이드했습니다. lustre 모듈은 `-1050`용으로 빌드됐습니다. 결과: `FATAL: lustre[mount fsx] exit code 19 (ENODEV)`.
 {: .block-warning }
 
-```bash
-sudo apt install -y lustre-client-modules-$(uname -r) lustre-client-utils
-```
-
-검증:
+`linux-modules-extra`를 먼저 설치하고 (커널 업그레이드 가능), `uname -r`을 확인한 다음, 그 커널용 lustre를 설치하세요:
 
 ```bash
-dpkg -l | grep lustre-client-modules
-# 노드에서 실행될 정확한 커널 버전과 일치해야 합니다
-uname -r  # 모든 설치 후 어느 커널인지 확인
+apt install -y linux-modules-extra-$(uname -r)   # 커널 업그레이드 가능
+# ... 다른 패키지들 ...
+# 마지막에:
+apt install -y lustre-client-modules-$(uname -r) lustre-client-utils
 ```
 
-**전략**: 먼저 모든 패키지 설치(`linux-modules-extra` 포함)를 실행하고, 마지막에 lustre 모듈을 설치하세요 — `uname -r`이 최종 커널 버전을 반영한 후. 이것이 일치를 보장하는 유일한 방법입니다.
+순서가 중요합니다. `linux-modules-extra` 전에 lustre를 설치하면 버전 불일치가 발생합니다.
 
 ---
 
-## OnNodeStart를 안전망으로 활용
+## OnNodeStart를 안전망으로
 
-탄탄한 AMI가 있어도 OnNodeStart에 이 내용을 멱등성 있는 안전망으로 추가하세요:
+AMI가 탄탄해도 OnNodeStart에 이것들을 넣어두면 좋습니다:
 
 ```bash
 #!/bin/bash
-# 안전망 — 멱등성, 여러 번 실행해도 안전
-
-# 1. ib_umad 로드 확인
-sudo modprobe ib_umad
-
-# 2. 잔여 reboot 플래그 제거 (이중 안전)
-sudo rm -f /var/run/reboot-required /var/run/reboot-required.pkgs
-
-# 3. fabricmanager가 활성화 상태인지 확인 (마스킹 아님)
-sudo systemctl unmask nvidia-fabricmanager 2>/dev/null || true
-sudo systemctl enable nvidia-fabricmanager
+modprobe ib_umad
+rm -f /var/run/reboot-required /var/run/reboot-required.pkgs
+systemctl unmask nvidia-fabricmanager 2>/dev/null || true
+systemctl enable nvidia-fabricmanager
 ```
+
+멱등성이 있습니다. 이미 올바른 상태면 비용이 없습니다.
 
 ---
 
-## 스냅샷 전 AMI 정리
-
-AMI 생성 전에 ParallelCluster 메타데이터를 정리하세요:
+## 스냅샷 전 정리
 
 ```bash
-sudo rm -f /opt/parallelcluster/system_info
-sudo /usr/local/sbin/ami_cleanup.sh
+rm -f /opt/parallelcluster/system_info
+/usr/local/sbin/ami_cleanup.sh
 ```
 
 > ##### DANGER
 >
-> `ami_cleanup.sh`를 건너뛰면 스냅샷이 빌드 인스턴스의 노드별 상태를 그대로 담게 됩니다. ParallelCluster가 AMI를 비표준으로 감지하고 일부 초기화 단계가 예측 불가능하게 동작할 수 있습니다.
+> `ami_cleanup.sh`를 건너뛰면 스냅샷이 빌드 인스턴스의 노드별 상태를 그대로 담습니다. ParallelCluster가 비표준으로 감지하고 일부 초기화 단계가 예측 불가능하게 동작합니다.
 {: .block-danger }
 
 ---
 
-## 커널 버전 드리프트: 조용한 킬러
-
-이 부분은 진단이 가장 어렵고 우리가 직접 경험한 원인이라 특별히 강조합니다.
-
-**무슨 일이 있었나**: AMI를 커널 `6.8.0-1050-aws`에서 빌드했습니다. 그 커널용 lustre 모듈을 설치했습니다. 클러스터 노드가 시작되자 cinc의 init 단계에서 `linux-modules-extra`를 설치했고, 이것이 커널을 `6.8.0-1052-aws`로 업그레이드했습니다. 우리 lustre 모듈은 `-1050`용으로 빌드됐습니다. 불일치로 인해:
-
-```
-FATAL: lustre[mount fsx] (aws-parallelcluster-environment::fsx line 33)
-Mixlib::ShellOut::ShellCommandFailed: exit code 19
-```
-
-`exit code 19 = ENODEV` — 실행 중인 커널에 커널 모듈이 단순히 존재하지 않습니다.
-
-**효과 있었던 해결책**: `linux-modules-extra` 설치(업그레이드를 트리거하는) 후 `uname -r`을 확인하면 새 커널이 표시됩니다. *그* 버전용 lustre를 설치하세요:
-
-```bash
-# AMI 빌드 스크립트 순서:
-apt install -y linux-modules-extra-$(uname -r)   # 커널 업그레이드 가능
-# ... 다른 패키지들 ...
-# 마지막에, 모든 설치 후:
-apt install -y lustre-client-modules-$(uname -r)  # 최종 커널 버전 사용
-```
-
----
-
-## 실패 패턴과 근본 원인 테이블
-
-| 증상 | 타이밍 | 근본 원인 |
-|------|--------|---------|
-| 노드 종료, dmesg에 "Pre-NVL5" | ~68초, cfn-signal 이전 | `ib_umad` 없음 |
-| cfn-signal 성공 후 노드 재부팅 | cfn-signal 후 ~7분 | `/var/run/reboot-required` → cinc finalize 재부팅 |
-| cinc가 `expected '0' but got '1'`로 실패 | ~3분, cfn-signal 이전 | AMI에서 `nvidia-fabricmanager`가 masked 상태 |
-| FSx 마운트가 `ENODEV`로 실패 | ~5~6분, cinc finalize 중 | lustre 모듈 커널 버전 불일치 |
-| 노드가 무작위로 중단, NVLink 오류 | 가변적 (시간/일) | `nvlsm` 미설치 |
-
----
-
-## 전체 AMI 빌드 스크립트
+## 전체 빌드 스크립트
 
 ```bash
 #!/bin/bash
-# pcluster 3.15 Ubuntu 22.04 p6-b200용 AMI 빌드 스크립트
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# Step 1: 기본 패키지 설치 (커널 업그레이드 가능)
 apt-get update -qq
 apt install -y linux-modules-extra-$(uname -r) infiniband-diags ibutils
 
-# Step 2: ib_umad 로드 및 영구화
 modprobe ib_umad
 echo "ib_umad" | tee -a /etc/modules
 
-# Step 3: nvlsm 설치
 wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/nvlsm_2025.10.11-1_amd64.deb
 dpkg -i nvlsm_2025.10.11-1_amd64.deb
 rm nvlsm_2025.10.11-1_amd64.deb
 
-# Step 4: fabricmanager 활성화 (절대 마스킹 금지)
 systemctl enable nvidia-fabricmanager
 
-# Step 5: reboot 플래그 억제
 tee /etc/apt/apt.conf.d/99-no-reboot-required > /dev/null <<'EOF'
 DPkg::Post-Invoke { "rm -f /var/run/reboot-required /var/run/reboot-required.pkgs 2>/dev/null || true"; };
 EOF
 systemctl mask unattended-upgrades
 apt remove --purge needrestart -y
 
-# Step 6: 최종 커널 버전용 lustre 설치 (모든 업그레이드 후)
+# lustre는 반드시 마지막에 — 커널 업그레이드가 모두 끝난 후
 apt install -y lustre-client-modules-$(uname -r) lustre-client-utils
 
-# Step 7: 정리
 rm -f /opt/parallelcluster/system_info
 /usr/local/sbin/ami_cleanup.sh
 
-echo "AMI 빌드 완료. 커널: $(uname -r)"
+echo "완료. 커널: $(uname -r)"
 ```
 
 ---
 
-## 검증 체크리스트
-
-빌드 후 스냅샷 전 실행하세요:
+## 스냅샷 전 검증
 
 ```bash
-# 1. ib_umad 로드됨
-lsmod | grep ib_umad && echo "✓ ib_umad" || echo "✗ ib_umad 없음"
-
-# 2. nvlsm 설치됨
-dpkg -l | grep -q nvlsm && echo "✓ nvlsm" || echo "✗ nvlsm 없음"
-
-# 3. fabricmanager 활성화됨 (마스킹 아님)
-systemctl is-enabled nvidia-fabricmanager | grep -q "^enabled$" && echo "✓ fabricmanager" || echo "✗ fabricmanager 활성화 안 됨"
-
-# 4. reboot 억제 훅 존재
-[ -f /etc/apt/apt.conf.d/99-no-reboot-required ] && echo "✓ reboot 훅" || echo "✗ reboot 훅 없음"
-
-# 5. lustre 모듈이 현재 커널과 일치
-dpkg -l lustre-client-modules-$(uname -r) 2>/dev/null | grep -q "^ii" && echo "✓ lustre ($(uname -r))" || echo "✗ $(uname -r)용 lustre 없음"
+lsmod | grep ib_umad && echo "ok: ib_umad" || echo "없음: ib_umad"
+dpkg -l | grep -q nvlsm && echo "ok: nvlsm" || echo "없음: nvlsm"
+systemctl is-enabled nvidia-fabricmanager | grep -q "^enabled$" && echo "ok: fabricmanager" || echo "상태 오류: fabricmanager"
+[ -f /etc/apt/apt.conf.d/99-no-reboot-required ] && echo "ok: reboot 훅" || echo "없음: reboot 훅"
+dpkg -l lustre-client-modules-$(uname -r) 2>/dev/null | grep -q "^ii" && echo "ok: lustre ($(uname -r))" || echo "없음: $(uname -r)용 lustre"
 ```
 
-5개 모두 통과해야 합니다. 하나라도 실패하면 AMI가 불완전한 것입니다.
+---
+
+## 실패 패턴 정리
+
+| 증상 | 타이밍 | 원인 |
+|------|--------|------|
+| 종료, dmesg에 "Pre-NVL5" | ~68초, cfn-signal 전 | 부팅 시 `ib_umad` 미로드 |
+| cfn-signal 성공 후 재부팅 | cfn-signal 후 ~7분 | `reboot-required` → cinc finalize |
+| cinc 실패, `expected '0' but got '1'` | ~3분, cfn-signal 전 | AMI에서 fabricmanager masked |
+| FSx 마운트 ENODEV | ~5~6분, cinc finalize | lustre 모듈 커널 버전 불일치 |
+| NVLink 오류, 노드 중단 | 가변적 (시간~일) | nvlsm 미설치 |
 
 ---
 
 ## 최종 결과
 
-7번의 AMI 반복 끝에:
+AMI 7번 반복 끝에:
 
-- **베이스**: pcluster 3.15 Ubuntu 22.04 (`ami-0dc2ffd737d30ca8a`, us-east-2)
-- **결과**: `ami-0fc2bf7c1bc3ed007` (us-east-2), `ami-0cd865a4b36faa2b5` (us-east-1)
-- **검증**: 20분 이상 안정, slurm job `R 20:10`, 노드 alloc 상태
-
-다섯 가지 체크리스트를 AMI 빌드 시점에 한 번 적용하면 네 가지 근본 원인이 모두 해결됩니다. 더 이상 68초 패닉도, 7분 유령 재부팅도, 마스킹된 서비스 실패도, 커널 불일치 FSx 오류도 없습니다.
+- 베이스: pcluster 3.15 Ubuntu 22.04
+- 결과: `ami-00a519913cff04008` (us-east-1)
+- 검증: 20분 이상 안정, slurm job 실행 중, 노드 alloc 상태
 
 ---
 
-> **시리즈**: AWS ParallelCluster로 분산 학습 환경 구축하기
+> **시리즈**: 분산 학습을 위한 GPU Cluster 세팅하기
 >
-> [← Part 2: p6-b200 노드가 계속 재부팅되는 이유](/pages/pcluster-series-2-reboots-ko/) | **Part 3: 커스텀 AMI 만들기**
+> [← Part 3: p6-b200 노드 재부팅 원인](/pages/pcluster-series-2-reboots-ko/) | 현재: **Part 4: 커스텀 AMI 만들기**
 {: .block-tip }
