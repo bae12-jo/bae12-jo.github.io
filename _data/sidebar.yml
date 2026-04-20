@@ -4,6 +4,12 @@ ko:
     children:
       - title: "GPU 클러스터 구성하기"
         url: /pages/p6b200-boot-retrospective/
+      - title: "Part 1: ParallelCluster 내부 동작 원리"
+        url: /pages/pcluster-series-1-internals-ko/
+      - title: "Part 2: p6-b200 노드 재부팅 원인 분석"
+        url: /pages/pcluster-series-2-reboots-ko/
+      - title: "Part 3: 커스텀 AMI 만들기"
+        url: /pages/pcluster-series-3-custom-ami-ko/
 
 en:
   - title: "Setting Up a GPU Cluster for Distributed Training"
