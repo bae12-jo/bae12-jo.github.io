@@ -12,7 +12,7 @@ lang_peer: /pages/pcluster-series-1-internals/
 >
 > [← Part 1: ParallelCluster는 어떤 서비스인가](/pages/pcluster-series-0-what-is-pcluster-ko/) | [Part 3: p6-b200 노드 재부팅 원인 →](/pages/pcluster-series-2-reboots-ko/)
 
-`pcluster create-cluster`를 실행하면 예상보다 훨씬 복잡한 일이 벌어집니다. 동일한 AMI와 스크립트도 standalone EC2에서와 ParallelCluster 안에서 완전히 다르게 동작합니다. 이 글은 그 이유를 설명합니다.
+`pcluster create-cluster`를 실행하면 노드 안에서 대부분의 엔지니어가 보지 못하는 일들이 벌어집니다. 동일한 AMI와 스크립트도 standalone EC2에서와 ParallelCluster 안에서 완전히 다르게 동작합니다. 이 글은 실제로 무슨 일이 일어나는지, 왜 그런지 설명합니다.
 
 ---
 
@@ -21,98 +21,182 @@ lang_peer: /pages/pcluster-series-1-internals/
 ```
 pcluster create-cluster
     ↓
-CloudFormation이 스택 생성 (HeadNode, ComputeNode, VPC, 보안 그룹)
+CloudFormation이 스택 생성
+(HeadNode, ComputeNode, VPC, 보안 그룹 — config에 정의된 모든 것)
     ↓
 EC2가 pcluster AMI로 인스턴스 시작
     ↓
-cloud-init phase 1: UserData 실행
+각 인스턴스에서 cloud-init 실행
+  phase 1: UserData 실행 (기본 OS 설정)
+  phase 2: cinc 부트스트랩 스크립트 실행
     ↓
-cloud-init phase 2: cinc (Chef) 부트스트랩 실행
+cinc가 pcluster 쿡북 실행
+(nvidia_config.rb, slurm_install.rb, efa_driver.rb ...)
     ↓
-cinc가 pcluster 쿡북 실행 (nvidia_config.rb, slurm_install.rb, efa_driver.rb ...)
+cinc finalize 단계에서 /var/run/reboot-required 확인
+  → 파일 있으면: 노드 재부팅
     ↓
-재부팅 (/var/run/reboot-required 있을 경우)
+OnNodeStart 훅 실행 (S3에서, cinc 진행 중에 실행됨)
     ↓
-OnNodeConfigured 실행
+cinc finalize 계속: FSx Lustre 마운트
     ↓
-cfn-signal 전송
+OnNodeConfigured 훅 실행
     ↓
-ComputeNode에서 slurmd, HeadNode에서 slurmctld 시작
+cfn-signal 전송: "이 노드 준비됨"
+    ↓
+ComputeNode에서 slurmd 시작
+HeadNode에서 slurmctld 시작
     ↓
 clustermgtd가 노드를 감지하고 idle 표시
 ```
 
-어느 단계든 실패하거나 걸리면 클러스터 생성 전체가 중단됩니다.
+어느 단계든 실패하거나 걸리면 클러스터 생성 전체가 무한정 중단됩니다.
 
 ---
 
-## cinc: 실제 설정 엔진
+## cloud-init: EC2 표준 부트스트랩 레이어
 
-ParallelCluster는 노드 설정에 임의의 스크립트를 사용하지 않습니다. **cinc**(Chef Infra Client 포크)로 정해진 쿡북을 실행합니다. cloud-init 이후, CustomActions 이전에 자동으로 실행됩니다.
+cloud-init은 클라우드 인스턴스를 초기화하는 업계 표준 도구입니다. 거의 모든 EC2 AMI에서 첫 부팅 시 자동으로 실행됩니다. ParallelCluster에서 cloud-init은 두 가지를 순서대로 수행합니다.
 
-GPU 노드에서 핵심은 `nvidia_config.rb`입니다. 엄격한 순서로 실행됩니다:
+Phase 1에서는 UserData를 실행합니다. 인스턴스 시작 시 선택적으로 전달할 수 있는 스크립트입니다. ParallelCluster는 이것을 기본 OS 레벨 설정에 사용합니다. 패키지 설치, 네트워크 구성, 파일시스템 레이아웃 준비 등입니다.
+
+Phase 2에서는 cinc 부트스트랩을 실행합니다. 실제 작업이 여기서 일어납니다. ParallelCluster는 pcluster 쿡북을 내려받아 실행하는 cinc 호출을 cloud-init에 내장해 뒀습니다. 별도로 설정하거나 트리거하지 않아도 됩니다. pcluster AMI의 cloud-init 설정에 이미 들어 있어서 자동으로 실행됩니다.
+
+---
+
+## cinc: 왜 돌아가고 무엇을 하는가
+
+cinc는 설정 관리 도구인 Chef Infra Client의 포크입니다. ParallelCluster가 Chef/cinc를 선택한 이유는 GPU 클러스터 설정이 정확한 순서로 실행돼야 하는 수십 가지 상호 의존적인 단계로 이루어지기 때문입니다. 셸 스크립트로는 취약합니다. cinc의 선언적 쿡북 모델은 원하는 상태를 정의하고 모든 노드에 멱등적으로 적용할 수 있습니다.
+
+cinc를 직접 호출하지 않습니다. 설정하지도 않습니다. pcluster AMI에 설치되어 있고 cloud-init이 호출하기 때문에 실행됩니다. OnNodeConfigured 스크립트가 시작되는 시점에 cinc는 이미 모든 작업을 마친 상태입니다.
+
+GPU 노드에서 cinc는 가장 핵심적인 쿡북인 `nvidia_config.rb`를 실행합니다:
 
 ```ruby
 gdrcopy :configure
   # gdrdrv 커널 모듈 로드
   # GPU Direct RDMA 활성화 (NVLink, EFA, fabric manager에 필요)
+  # 이 단계가 성공해야 fabric_manager가 실행됨
 
 fabric_manager :configure
   # nvidia-fabricmanager 시작
-  # 이미 실행 중이면 → no-op
-  # masked 상태면 → 항상 exit code 1로 실패
+  # 이미 실행 중이면 → no-op, cinc가 다음으로 넘어감
+  # masked 상태 (systemctl mask)면 → 항상 exit code 1, cinc가 FATAL로 실패
+  # disabled 상태면 → 시작 시도
 
 run_nvidiasmi
+  # nvidia-smi 실행해서 GPU 인식 검증
+  # 여기서 GPU가 안 보이면 Slurm에서도 안 보임
+
 efa_driver :setup
+  # 아직 설치 안 됐으면 EFA 드라이버 설치
+
 slurm_install :configure
+  # Slurm 설치, slurm.conf 작성
 ```
 
-쿡북 완료 후 cinc가 finalize 단계를 실행합니다:
+모든 쿡북이 완료되면 cinc가 finalize 단계를 실행합니다:
 
 ```
 cinc finalize:
   1. /var/run/reboot-required 확인
-     → 파일 있으면: 재부팅
-  2. FSx Lustre 마운트
+     → 파일 있으면: 즉시 재부팅
+  2. FSx Lustre 파일시스템 마운트
 ```
 
 > ##### WARNING
 >
-> 커스텀 AMI가 설치하는 패키지 중 하나라도 `/var/run/reboot-required`를 만들면, cinc finalize가 노드를 재부팅시켜 OnNodeConfigured가 실행되지 않습니다. GPU 클러스터에서 원인 불명의 재부팅이 발생하는 가장 흔한 원인입니다 — 타임아웃처럼 보이지만 재부팅 트리거입니다.
+> cinc가 설치하는 패키지 중 하나라도 `/var/run/reboot-required`를 만들면, finalize 단계가 노드를 재부팅시켜 OnNodeConfigured 스크립트가 실행되지 않습니다. 외부에서는 부트스트랩 타임아웃처럼 보입니다. Part 3에서 자세히 다룹니다.
 {: .block-warning }
 
 ---
 
-## OnNodeStart vs OnNodeConfigured: 타이밍이 직관적이지 않다
+## OnNodeStart vs OnNodeConfigured: 타이밍이 중요하다
+
+두 훅은 시퀀스에서 매우 다른 시점에 실행됩니다:
 
 ```
 cloud-init (UserData) 완료
     ↓
 cinc 시작
     ↓
-OnNodeStart 실행  ← cinc 완료 전에 실행됨
+OnNodeStart 실행  ← cinc 실행 중에 실행됨
     ↓
-cinc 계속 실행 후 완료
+cinc가 모든 쿡북 + finalize 완료
     ↓
-cfn-signal
+cfn-signal 전송
     ↓
-OnNodeConfigured 실행  ← cinc 완료 후
+OnNodeConfigured 실행  ← cinc 완전히 끝난 후 실행됨
     ↓
 slurmd 시작
 ```
 
-OnNodeStart는 cinc가 GPU 드라이버, GDRcopy, fabricmanager를 로드하기 *전에* 실행됩니다. 여기서 `nvidia-smi`를 실행하면 실패하거나 멈춥니다. GPU 검증은 OnNodeConfigured에 넣어야 합니다.
+OnNodeStart는 cinc가 시스템을 설정하는 도중에 실행됩니다. GPU 드라이버가 아직 로드되지 않았고, GDRcopy도 설정되지 않았으며, nvidia-fabricmanager도 시작되지 않았습니다. OnNodeStart에서 `nvidia-smi`를 실행하면 실패하거나 멈춥니다.
+
+OnNodeConfigured는 cinc가 모든 것을 끝낸 후에 실행됩니다. GPU 검증은 여기에 넣어야 합니다.
 
 ```yaml
 OnNodeStart: |
   #!/bin/bash
-  # 커널 모듈 준비, reboot 플래그 정리 — nvidia-smi 여기 금지
+  # 안전: 커널 모듈 로드, reboot 플래그 정리
+  # 위험: nvidia-smi, cinc가 먼저 실행해야 하는 모든 것
 
 OnNodeConfigured: |
   #!/bin/bash
-  nvidia-smi           # cinc가 끝난 후라 안전
-  nvidia-fabricmanager -n
+  nvidia-smi              # cinc 완료, GPU 인식됨
+  nvidia-fabricmanager -n # fabricmanager 실행 중
 ```
+
+---
+
+## After=slurmd.service: 어떻게 동작하고 어디서 한계가 있나
+
+부트스트랩 이후 모니터링 설정을 실행하는 일반적인 패턴은 `After=slurmd.service`를 가진 systemd 서비스를 만드는 것입니다:
+
+```ini
+[Unit]
+Description=Post-bootstrap monitoring setup
+After=slurmd.service
+Wants=slurmd.service
+```
+
+이 방식은 서비스 유닛이 등록된 후 slurmd가 시작될 때 동작합니다. slurmd의 inactive에서 active로의 상태 전환 시 트리거됩니다.
+
+문제는: OnNodeConfigured가 실행될 시점에 slurmd는 이미 시작된 상태입니다. systemd의 `After=` 의존성은 상태 전환 시에만 발동합니다. 서비스가 등록될 때 slurmd가 이미 running이면 `After=slurmd.service` 트리거가 발동하지 않습니다.
+
+해결책은 OnNodeConfigured 마지막에 서비스를 활성화한 후 명시적으로 시작하는 것입니다:
+
+```bash
+# OnNodeConfigured (setup-compute-node.sh)
+systemctl enable post-slurmd-monitoring.service
+
+# slurmd가 이미 실행 중이면 직접 트리거
+if systemctl is-active --quiet slurmd; then
+  systemctl start post-slurmd-monitoring.service &
+fi
+```
+
+`&`는 의도적입니다. 사후 부트스트랩 설정(Docker 이미지 pull, 패키지 설치, 바이너리 빌드)은 몇 분이 걸립니다. 백그라운드로 실행하면 cfn-signal이 제때 발송되고 slurmd가 slurmctld에 등록되며, 모니터링 설정은 병렬로 계속됩니다.
+
+---
+
+## Standalone 테스트의 함정
+
+동일한 pcluster AMI로 standalone EC2 인스턴스에서 OnNodeConfigured 스크립트를 테스트하는 것은 빠르게 반복할 수 있는 좋은 방법처럼 보입니다. 결과가 잘못된 방향으로 흐를 수 있습니다.
+
+Standalone에서는 cinc가 실행되지 않습니다. Chef 쿡북도 실행되지 않습니다. 그래서 cinc가 원래 처리하는 것들을 스크립트에 전부 넣게 됩니다. 모듈 로드, 서비스 시작, 드라이버 설정 등. 그런 다음 실제 클러스터에서 스크립트를 실행하면 깨집니다.
+
+이유는: cinc가 이미 그 작업들을 다 했기 때문입니다. 스크립트가 다시 시도하면 타이밍 충돌이 발생합니다. 실패 양상은 무작위처럼 보이지만 아닙니다.
+
+p6-b200 디버깅에서 나온 구체적인 사례:
+
+- OnNodeConfigured에서 `systemctl enable --now nvidia-fabricmanager` 실행: cinc의 `fabric_manager :configure`가 이미 처리했습니다. 중복 시작이 NVSwitch 초기화 중 race condition을 만듭니다.
+- OnNodeConfigured에서 `systemctl daemon-reload` 실행: cinc가 이미 여러 번 호출했습니다. GPU 드라이버 초기화 도중 추가 daemon-reload가 p6-b200에서 커널 패닉을 유발했습니다.
+- OnNodeStart에서 `nvidia-smi` 실행: cinc의 `run_nvidiasmi`가 아직 실행되지 않았습니다. 드라이버 로딩과 경쟁하다 실패합니다.
+
+GPU 설정을 건드리는 OnNodeConfigured 로직을 작성하기 전에, cinc 쿡북이 이미 무엇을 처리하는지 먼저 확인하세요. 소스는 실행 중인 pcluster 노드의 `/etc/chef/cookbooks/aws-parallelcluster-*/`에 있습니다.
+
+훅 스크립트를 작성할 때 올바른 질문은 "무엇을 설정해야 하는가?"가 아니라 "cinc가 처리하지 않는 것은 무엇이고, cinc와 충돌 없이 할 수 있는 것은 무엇인가?"입니다.
 
 ---
 
@@ -154,15 +238,15 @@ cfn-hup (CloudFormation 모니터, HeadNode)
 
 ## 정적 노드 vs 동적 노드
 
-**정적 노드** (`MinCount > 0`)는 항상 켜져 있습니다. DOWN이 되면 clustermgtd가 재부팅시킵니다. 2~5분 후 복구됩니다. p6-b200 + Capacity Block 조합에서는 정적 노드가 거의 항상 맞습니다. 동적 노드를 종료하면 CB 슬롯이 반환되고 재확보가 안 될 수 있습니다.
+**정적 노드** (`MinCount > 0`)는 항상 켜져 있습니다. DOWN이 되면 clustermgtd가 재부팅시키고 2~5분 후 복구됩니다. p6-b200 + Capacity Block 조합에서는 정적 노드가 거의 항상 맞습니다. 동적 노드 시작은 8~15분이 걸리고, 종료 시 CB 슬롯이 반환되면 재확보가 안 될 수 있습니다.
 
 **동적 노드** (`MinCount = 0`)는 작업이 있을 때만 존재합니다. `SuspendTime` 초 동안 유휴 상태면 인스턴스가 종료됩니다. 다음 작업이 오면 처음부터 cloud-init + cinc를 다시 거칩니다.
 
-GPU 클러스터에서는 `SuspendTime: 36000`으로 설정하세요. 기본값 300초면 노드가 계속 종료되고 재부팅됩니다. CB 슬롯도 매번 반환됩니다.
+GPU 클러스터에서는 `SuspendTime: 36000`으로 설정하세요. 기본값 300초면 노드가 계속 종료되고 재부팅됩니다.
 
 > ##### DANGER
 >
-> `SuspendTime: 0`이면 유휴 상태가 되는 즉시 인스턴스가 종료됩니다. CB 슬롯이 반환되고, 다음 launch는 `ReservationCapacityExceeded`로 실패합니다. p6-b200에서는 절대 하지 마세요.
+> `SuspendTime: 0`이면 유휴 상태가 되는 즉시 인스턴스가 종료됩니다. CB 슬롯이 반환되고, 다음 launch는 `ReservationCapacityExceeded`로 실패합니다.
 {: .block-danger }
 
 ---
@@ -179,28 +263,23 @@ p6-b200에서는 `ComputeNodeBootstrapTimeout: 3600`으로 설정하세요. cinc
 
 ---
 
-## Standalone 테스트가 클러스터 테스트를 대체할 수 없는 이유
-
-Standalone EC2 인스턴스에서는 cinc가 실행되지 않습니다. Chef 쿡북도, reboot 플래그도, clustermgtd도, cfn-hup도 없습니다. Part 3에서 다루는 네 가지 실패 원인은 모두 ParallelCluster의 오케스트레이션 레이어가 있어야 트리거됩니다. Standalone에서 잘 되고 클러스터에서 깨진다면, 그 차이가 cinc 단계에 있습니다.
-
----
-
 ## 디버깅 레퍼런스
 
 ```bash
 # HeadNode
-tail -f /var/log/slurmctld.log         # 노드 상태 변경, DOWN 원인
-tail -f /var/log/slurm_elastic.log     # clustermgtd 결정
-systemctl status cfn-hup               # CloudFormation 모니터 실행 중?
+tail -f /var/log/slurmctld.log              # 노드 상태 변경, DOWN 원인
+tail -f /var/log/slurm_elastic.log          # clustermgtd 결정
+systemctl status cfn-hup                    # CloudFormation 모니터 실행 중?
 
 # ComputeNode
-tail -f /var/log/slurmd.log            # 하트비트, 작업 시작
-nvidia-smi                             # GPU 인식?
-ls /var/run/reboot-required            # reboot 플래그 존재?
+tail -f /var/log/slurmd.log                 # 하트비트, 작업 시작
+tail -f /var/log/parallelcluster/cinc.log   # cinc 쿡북 실행, 오류
+nvidia-smi                                  # GPU 인식?
+ls /var/run/reboot-required                 # reboot 플래그 존재?
 
 # Slurm
-sinfo -N                               # 노드별 상태
-scontrol show node <nodename>          # 노드 상세 정보, reason 포함
+sinfo -N                                    # 노드별 상태
+scontrol show node <nodename>               # 노드 상세 정보, reason 포함
 ```
 
 ---
