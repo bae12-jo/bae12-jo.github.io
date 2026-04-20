@@ -2,20 +2,24 @@ ko:
   - title: "분산 학습을 위한 GPU Cluster 세팅하기"
     url: /pages/distributed-training/
     children:
-      - title: "Part 1: ParallelCluster 내부 동작 원리"
+      - title: "Part 1: ParallelCluster는 어떤 서비스인가"
+        url: /pages/pcluster-series-0-what-is-pcluster-ko/
+      - title: "Part 2: ParallelCluster 내부 동작 원리"
         url: /pages/pcluster-series-1-internals-ko/
-      - title: "Part 2: p6-b200 노드 재부팅 원인 분석"
+      - title: "Part 3: p6-b200 노드 재부팅 원인 분석"
         url: /pages/pcluster-series-2-reboots-ko/
-      - title: "Part 3: 커스텀 AMI 만들기"
+      - title: "Part 4: 커스텀 AMI 만들기"
         url: /pages/pcluster-series-3-custom-ami-ko/
 
 en:
   - title: "Setting Up a GPU Cluster for Distributed Training"
     url: /pages/distributed-training-en/
     children:
-      - title: "Part 1: How AWS ParallelCluster Works Under the Hood"
+      - title: "Part 1: What Kind of Service Is ParallelCluster?"
+        url: /pages/pcluster-series-0-what-is-pcluster-en/
+      - title: "Part 2: How AWS ParallelCluster Works Under the Hood"
         url: /pages/pcluster-series-1-internals/
-      - title: "Part 2: Why Your p6-b200 Nodes Keep Rebooting"
+      - title: "Part 3: Why Your p6-b200 Nodes Keep Rebooting"
         url: /pages/pcluster-series-2-reboots/
-      - title: "Part 3: Building a Custom AMI for p6-b200"
+      - title: "Part 4: Building a Custom AMI for p6-b200"
         url: /pages/pcluster-series-3-custom-ami/
