@@ -12,6 +12,41 @@ lang_peer: /pages/pcluster-series-2-reboots/
 >
 > [← Part 2: ParallelCluster 내부 동작 원리](/pages/pcluster-series-1-internals-ko/) | [Part 4: 커스텀 AMI 만들기 →](/pages/pcluster-series-3-custom-ami-ko/)
 
+## 클러스터가 뜨기도 전에 롤백되나요?
+
+그렇습니다. p6-b200 같은 GPU 인스턴스에서는 이 문제를 모르면 계속 당합니다.
+
+`pcluster create-cluster`를 실행하면 CloudFormation이 스택을 시작하고 모든 리소스가 성공 신호를 보내기를 기다립니다. 컴퓨트 노드는 cloud-init을 돌리고, cinc를 실행하고, 드라이버를 설치하고, `ComputeNodeBootstrapTimeout` 안에 `cfn-signal`을 보내야 합니다. p6-b200에서 이 부트스트랩만 15~25분이 걸립니다. 기본 타임아웃은 30분입니다. 제때 신호를 못 보내면 CloudFormation이 실패로 표시하고 스택 전체를 롤백합니다.
+
+롤백이 되면 HeadNode, FSx 연결, 네트워킹이 전부 사라집니다. 처음부터 다시 만들어야 합니다.
+
+두 가지 설정이 이 상황을 바꿔줍니다:
+
+```yaml
+# 클러스터 설정
+DevSettings:
+  Timeouts:
+    ComputeNodeBootstrapTimeout: 3600
+```
+
+```bash
+# 생성 시
+pcluster create-cluster \
+  --cluster-configuration config.yaml \
+  --rollback-on-failure false
+```
+
+타임아웃 증가는 단순합니다. 부트스트랩이 끝날 시간을 충분히 주는 것입니다. `--rollback-on-failure false`가 더 중요합니다. 노드가 실패해도 스택을 살려두기 때문에 SSM으로 접속해서 무슨 일이 있었는지 실제로 볼 수 있습니다. 이 옵션 없이는 실패할 때마다 클러스터가 날아가고 눈 가리고 디버깅해야 합니다.
+
+> ##### DANGER
+>
+> Capacity Block 인스턴스에서 롤백은 특히 치명적입니다. 스택이 해체되면 CB 슬롯이 반환되고 다시 확보하지 못할 수 있습니다. p6-b200 설정을 반복 테스트할 때는 반드시 `--rollback-on-failure false`를 사용하세요.
+{: .block-danger }
+
+노드가 실패했을 때 클러스터를 삭제하고 재생성하지 마세요. `pcluster update-cluster`로 설정을 밀거나, SSM으로 문제 노드에 직접 접속해서 고치세요. 재생성하면 HeadNode 부트스트랩도 다시 거쳐야 합니다. 10~15분이 또 날아갑니다.
+
+---
+
 p6-b200.48xlarge 클러스터를 프로비저닝하고, 타임아웃을 두 배로 늘리고, 헬스 체크를 비활성화해도 노드가 계속 죽습니다. 어떤 노드는 정확히 68초에 재부팅됩니다. 어떤 노드는 7분을 버티다 사라집니다. 몇몇은 완전히 부팅된 후에도 루프를 돌며 재시작합니다. 뻔한 해결책들이 통하지 않아서 이 글을 읽고 계신 겁니다.
 
 근본 원인이 네 가지 있습니다. 각각 다른 시점에, 다른 오류 메시지로, 다른 것처럼 위장합니다.

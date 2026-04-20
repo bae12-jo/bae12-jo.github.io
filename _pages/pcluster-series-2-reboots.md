@@ -12,6 +12,41 @@ lang_peer: /pages/pcluster-series-2-reboots-ko/
 >
 > [← Part 2: How ParallelCluster Works](/pages/pcluster-series-1-internals/) | [Part 4: Building a Custom AMI →](/pages/pcluster-series-3-custom-ami/)
 
+## Will the cluster roll back before it even comes up?
+
+Yes, and on GPU instances like p6-b200 this happens often until you know to watch for it.
+
+When you run `pcluster create-cluster`, CloudFormation starts a stack and waits for every resource to signal success. Compute nodes have to complete cloud-init, run cinc (the Chef bootstrap), install drivers, and send a `cfn-signal`, all within `ComputeNodeBootstrapTimeout`. On p6-b200, that bootstrap alone takes 15 to 25 minutes. The default timeout is 30 minutes. If the node doesn't signal in time, CloudFormation marks it failed and rolls back the entire stack.
+
+The rollback destroys everything: the HeadNode, the FSx association, the networking. You're back to zero and have to recreate it all from scratch.
+
+Two settings matter here:
+
+```yaml
+# cluster config
+DevSettings:
+  Timeouts:
+    ComputeNodeBootstrapTimeout: 3600
+```
+
+```bash
+# at create time
+pcluster create-cluster \
+  --cluster-configuration config.yaml \
+  --rollback-on-failure false
+```
+
+The timeout increase is straightforward, give the bootstrap enough room. The `--rollback-on-failure false` flag is more important: it keeps the stack alive when a node fails, so you can SSH or SSM in and actually see what went wrong. Without it, every failed attempt wipes the cluster and you're debugging blind.
+
+> ##### DANGER
+>
+> On Capacity Block instances, a rollback is especially costly. The CB slot gets released when the stack tears down, and you may not get it back. If you're iterating on a p6-b200 setup, always use `--rollback-on-failure false`.
+{: .block-danger }
+
+If a node fails during iteration, don't delete the cluster and recreate it. Use `pcluster update-cluster` to push config changes, or fix things directly on the stuck node via SSM. Recreating means bootstrapping the HeadNode again, another 10 to 15 minutes gone.
+
+---
+
 You've provisioned a p6-b200.48xlarge cluster, doubled the timeouts, disabled health checks, and the nodes still die. Some reboot at exactly 68 seconds. Others make it to 7 minutes then vanish. A few boot completely then restart in a loop. The obvious things didn't work.
 
 There are four distinct root causes. Each appears at a different time, produces a different error, and looks like something else.
