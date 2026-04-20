@@ -3,6 +3,7 @@ title: "Distributed Training - Part 2: Why Your p6-b200 Nodes Keep Rebooting"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
+lang_peer: /pages/pcluster-series-2-reboots-ko/
 ---
 
 # Why Your p6-b200 Compute Nodes Keep Rebooting on AWS ParallelCluster

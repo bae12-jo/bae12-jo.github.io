@@ -3,6 +3,7 @@ title: "Distributed Training - Part 1: How AWS ParallelCluster Works Under the H
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
+lang_peer: /pages/pcluster-series-1-internals-ko/
 ---
 
 # How AWS ParallelCluster Actually Works Under the Hood

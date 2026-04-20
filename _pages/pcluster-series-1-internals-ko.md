@@ -3,6 +3,7 @@ title: "분산 학습 - Part 1: AWS ParallelCluster의 내부 동작 원리"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
+lang_peer: /pages/pcluster-series-1-internals/
 ---
 
 # AWS ParallelCluster는 실제로 어떻게 동작하는가

@@ -3,6 +3,7 @@ title: "분산 학습 - Part 2: p6-b200 노드가 계속 재부팅되는 이유"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
+lang_peer: /pages/pcluster-series-2-reboots/
 ---
 
 # AWS ParallelCluster에서 p6-b200 컴퓨트 노드가 계속 재부팅되는 이유

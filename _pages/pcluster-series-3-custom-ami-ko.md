@@ -3,6 +3,7 @@ title: "분산 학습 - Part 3: p6-b200을 위한 커스텀 AMI 만들기"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
+lang_peer: /pages/pcluster-series-3-custom-ami/
 ---
 
 # AWS ParallelCluster에서 p6-b200 문제를 해결하는 커스텀 AMI 만들기
