@@ -1,9 +1,9 @@
 ---
 title: Contact
-author: Tao He
-date: 2022-02-05
-category: Jekyll
+author: Bailey Sohyeon Cho
 layout: post
 ---
 
-This is an contact page.
+# Contact
+
+[bae12-jo@gmail.com](mailto:bae12-jo@gmail.com)
