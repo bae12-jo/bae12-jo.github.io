@@ -256,7 +256,9 @@ For large-scale distributed training (hundreds or thousands of GPUs), a single n
 
 This is why Capacity Block reservations are effectively required for serious distributed training. Spot instances can be reclaimed at any time. On-demand instances may not be available at the scale you need. A Capacity Block guarantees a fixed number of instances are available at a specific time for a specific duration.
 
-The tradeoff: CB instances are more expensive than on-demand and must be reserved in advance. The CB slot is released on instance termination, so rollbacks and unexpected instance replacements during the reservation window cost you capacity you may not recover. Use `--rollback-on-failure false` and avoid unnecessary instance cycling during active reservations.
+The tradeoff: CB instances require upfront reservation and commitment to a specific time window. In most cases CB pricing is comparable to or lower than on-demand. The main exception is large-scale long-term contracts with private pricing agreements (PPA), where per-unit cost can dip below CB rates. Unlike Spot instances, a CB reservation guarantees your instances for the full duration you reserved.
+
+One common misconception: if a node fails and gets replaced during a CB reservation, the slot does not disappear. The new instance launch uses the same reservation. What you lose is time. A bootstrap cycle takes 10 to 20 minutes, and on a tight reservation window that adds up. Use `--rollback-on-failure false` to minimize unnecessary instance cycling and keep your reserved window productive.
 
 ---
 
