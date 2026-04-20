@@ -51,6 +51,13 @@
             {% if site.ordered_collections %}
                 {% for label in site.ordered_collections %}
                     {% assign collection = site.collections | where: "label", label | first %}
+                    {% if collection.label == "pages" %}
+                    <li class="header" data-lang="ko">블로그</li>
+                    <li class="header" data-lang="en" style="display:none">BLOG</li>
+                    {% elsif collection.label == "authors" %}
+                    <li class="header" data-lang="ko">저자</li>
+                    <li class="header" data-lang="en" style="display:none">AUTHORS</li>
+                    {% endif %}
                         {% if collection.label == "posts" %}
                             {% assign reversed_posts = site[collection.label] | reverse %}
                         {% else %}
