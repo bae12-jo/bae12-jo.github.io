@@ -3,6 +3,7 @@ title: "Distributed Training - Part 2: Why Your p6-b200 Nodes Keep Rebooting"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
+parent: "Setting Up a GPU Cluster"
 ---
 
 # Why Your p6-b200 Compute Nodes Keep Rebooting on AWS ParallelCluster

@@ -1,13 +1,10 @@
 <div class="book-summary">
     <script type="text/javascript">
-        // Fixes the page links scroll problem on both desktop and mobile browsers
         function pageScrollToTop(element) {
-            // both mobile and non-mobile
             $('div.body-inner').animate({scrollTop: 0});
             $(element).parent().find('li>ul>li').removeClass('active');
-            return true;  // propagate
+            return true;
         }
-        // Fixes the anchor links scroll problem on mobile browsers
         function mobilePageScrollToAnchor(element) {
             $(element).closest('li.chapter').find('ul>li').removeClass('active');
             $(element).parent().addClass('active');
@@ -60,26 +57,58 @@
                         <li class="header" data-lang="en" style="display:none">AUTHORS</li>
                         {% endif %}
 
-                        {% assign reversed_posts = site[collection.label] %}
+                        {% assign all_posts = site[collection.label] %}
 
-                        {% for post in reversed_posts %}
-                            {% if page.url == post.url %}
-                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                            {% else %}
-                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
-                            {% endif %}
-                                <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
-                                    {{ post.title | escape }}
-                                </a>
-                                {% if site.toc.enabled %}
-                                    {% if page.url == post.url %}
-                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
-                                    {% endif %}
+                        {% for post in all_posts %}
+                            {% unless post.parent %}
+                                {% assign is_active = false %}
+                                {% if page.url == post.url %}{% assign is_active = true %}{% endif %}
+                                {% comment %} also mark parent active when a child is active {% endcomment %}
+                                {% assign children = all_posts | where: "parent", post.title %}
+                                {% for child in children %}
+                                    {% if page.url == child.url %}{% assign is_active = true %}{% endif %}
+                                {% endfor %}
+
+                                {% if is_active %}
+                                <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
+                                {% else %}
+                                <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{post.url}}" {% if post.lang %}data-lang="{{post.lang}}"{% endif %}>
                                 {% endif %}
-                            </li>
+                                    <a href="{{site.baseurl}}{{post.url}}" onclick="pageScrollToTop(this)">
+                                        {{ post.title | escape }}
+                                    </a>
+                                    {% if site.toc.enabled %}
+                                        {% if page.url == post.url %}
+                                            {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
+                                        {% endif %}
+                                    {% endif %}
+
+                                    {% assign children = all_posts | where: "parent", post.title %}
+                                    {% if children.size > 0 %}
+                                    <ul class="articles">
+                                        {% for child in children %}
+                                            {% if page.url == child.url %}
+                                            <li class="chapter active" data-level="1.2" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                            {% else %}
+                                            <li class="chapter" data-level="1.1" data-path="{{site.baseurl}}{{child.url}}" {% if child.lang %}data-lang="{{child.lang}}"{% endif %}>
+                                            {% endif %}
+                                                <a href="{{site.baseurl}}{{child.url}}" onclick="pageScrollToTop(this)">
+                                                    {{ child.title | escape }}
+                                                </a>
+                                                {% if site.toc.enabled %}
+                                                    {% if page.url == child.url %}
+                                                        {% include toc.html html=content h_min=site.toc.h_min h_max=site.toc.h_max %}
+                                                    {% endif %}
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% endif %}
+                                </li>
+                            {% endunless %}
                         {% endfor %}
 
-                        {% if reversed_posts.size > 0 %}
+                        {% if all_posts.size > 0 %}
                             <li class="divider"></li>
                         {% endif %}
                     {% endif %}

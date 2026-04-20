@@ -3,6 +3,7 @@ title: "Distributed Training - Part 3: Building a Custom AMI for p6-b200"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en
+parent: "Setting Up a GPU Cluster"
 ---
 
 # Building a Custom AMI to Fix p6-b200 on AWS ParallelCluster
