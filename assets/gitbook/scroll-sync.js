@@ -1,55 +1,64 @@
 (function() {
-  function getHeadings() {
-    return Array.from(document.querySelectorAll('.page-inner h1, .page-inner h2, .page-inner h3'));
-  }
+  document.addEventListener('DOMContentLoaded', function() {
+    var bodyInner = document.querySelector('.body-inner') || document.querySelector('.page-inner');
+    if (!bodyInner) return;
 
-  function getTocLinks() {
-    return Array.from(document.querySelectorAll('.book-summary .inner ul li a[href*="#"]'));
-  }
+    var tocLinks = null;
 
-  function syncToc() {
-    var headings = getHeadings();
-    if (!headings.length) return;
-
-    var scrollTop = document.querySelector('.body-inner')
-      ? document.querySelector('.body-inner').scrollTop
-      : window.scrollY;
-
-    var current = null;
-    for (var i = 0; i < headings.length; i++) {
-      if (headings[i].offsetTop - 80 <= scrollTop) {
-        current = headings[i];
-      } else {
-        break;
+    function getTocLinks() {
+      if (!tocLinks) {
+        tocLinks = Array.from(document.querySelectorAll('.book-summary a[href*="#"]'));
       }
+      return tocLinks;
     }
 
-    if (!current) current = headings[0];
-    var id = current.id;
+    function getHeadings() {
+      return Array.from(document.querySelectorAll('.page-inner h1[id], .page-inner h2[id], .page-inner h3[id]'));
+    }
 
-    getTocLinks().forEach(function(a) {
-      var li = a.parentElement;
-      if (a.getAttribute('href') === '#' + id) {
-        li.classList.add('active');
-        // scroll toc item into view
-        var summary = document.querySelector('.book-summary nav');
-        if (summary) {
-          var liTop = li.offsetTop;
-          var summaryH = summary.clientHeight;
-          if (liTop < summary.scrollTop || liTop > summary.scrollTop + summaryH - 40) {
-            summary.scrollTop = liTop - summaryH / 2;
-          }
+    function syncToc() {
+      var headings = getHeadings();
+      var links = getTocLinks();
+      if (!headings.length || !links.length) return;
+
+      var scrollEl = document.querySelector('.body-inner') || window;
+      var scrollTop = scrollEl === window ? window.scrollY : scrollEl.scrollTop;
+
+      var current = headings[0];
+      for (var i = 0; i < headings.length; i++) {
+        if (headings[i].offsetTop - 100 <= scrollTop) {
+          current = headings[i];
+        } else {
+          break;
         }
-      } else {
-        li.classList.remove('active');
       }
-    });
-  }
 
-  document.addEventListener('DOMContentLoaded', function() {
-    var bodyInner = document.querySelector('.body-inner');
-    var target = bodyInner || window;
-    target.addEventListener('scroll', syncToc);
-    syncToc();
+      var currentId = current ? current.id : null;
+
+      links.forEach(function(a) {
+        var href = a.getAttribute('href') || '';
+        var hash = href.split('#')[1];
+        var li = a.closest('li');
+        if (!li) return;
+        if (hash && hash === currentId) {
+          li.classList.add('active');
+          // scroll sidebar to keep active item visible
+          var nav = document.querySelector('.book-summary nav');
+          if (nav) {
+            var liTop = li.offsetTop;
+            var navH = nav.clientHeight;
+            if (liTop < nav.scrollTop || liTop > nav.scrollTop + navH - 60) {
+              nav.scrollTop = liTop - navH / 2;
+            }
+          }
+        } else {
+          li.classList.remove('active');
+        }
+      });
+    }
+
+    var scrollEl = document.querySelector('.body-inner') || window;
+    scrollEl.addEventListener('scroll', syncToc);
+    setTimeout(syncToc, 300); // wait for TOC render
   });
 })();

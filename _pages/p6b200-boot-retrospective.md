@@ -5,7 +5,7 @@ date: 2026-04-20
 category: Infrastructure
 layout: post
 lang: ko
-lang_peer: /infrastructure/2026-04-20-p6b200-boot-retrospective-en
+lang_peer: /pages/p6b200-boot-retrospective-en/
 ---
 
 # P6-B200(Hopper) 런치 AMI 만들기

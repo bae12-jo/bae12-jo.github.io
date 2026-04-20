@@ -5,7 +5,7 @@ date: 2026-04-20
 category: Infrastructure
 layout: post
 lang: en
-lang_peer: /infrastructure/2026-04-20-p6b200-boot-retrospective
+lang_peer: /pages/p6b200-boot-retrospective/
 ---
 
 # Building a Launch AMI for P6-B200 on AWS ParallelCluster

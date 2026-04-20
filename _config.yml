@@ -4,7 +4,7 @@ longtitle:        Distributed by Design - Bailey's Tech Blog
 author:           Bailey Sohyeon Cho
 email:            bae12.jo@gmail.com
 description: >
-  Build Jekyll site with the GitBook style.
+  Infra engineering notes on distributed systems, GPU clusters, and scale.
 
 version:          1.0
 gitbook_version:  3.2.3
@@ -13,7 +13,6 @@ url:              'https://bae12-jo.github.io'
 baseurl:          ''
 rss:              RSS
 
-# bootstrap: use the remote theme for the site itself
 remote_theme: sighingnow/jekyll-gitbook
 
 toc:
@@ -22,10 +21,8 @@ toc:
   h_min:   1
   h_max:   3
 
-# customize the link favicon in header, will be {{site.baseurl}}/{{site.favicon_path}}
 favicon_path:     /assets/gitbook/images/favicon.ico
 
-# markdown render engine.
 markdown:         kramdown
 kramdown:
   parse_block_html: true
@@ -42,11 +39,7 @@ syntax_highlighter_style: monokai
 
 markdown_ext:             markdown,mkdown,mkdn,mkd,md
 
-# Permalinks
 permalink:                /:categories/:year-:month-:day-:title:output_ext
-
-# Disqus comments
-# disqushandler:            sighingnow
 
 exclude:
   - _drafts
@@ -55,14 +48,13 @@ collections:
   pages:
     output: true
     permalink: /:collection/:path/
-  others:
+  authors:
     output: true
     permalink: /:collection/:path/
 
 ordered_collections:
-  - posts
   - pages
-  - others
+  - authors
 
 page_width: 800px
 
@@ -75,9 +67,8 @@ plugins:
   - jekyll-readme-index
   - jemoji
 
-# Social links - update with your profiles
 github_username: bae12-jo
-linkedin_username: csbailey  # LinkedIn username from URL: linkedin.com/in/YOUR-USERNAME
+linkedin_username: csbailey
 
 extra_header_js:
   - assets/gitbook/lang-toggle.js
