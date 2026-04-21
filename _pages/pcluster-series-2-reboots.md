@@ -1,5 +1,5 @@
 ---
-title: "Part 3: Why Your p6-b200 Nodes Keep Rebooting"
+title: "Part 3: Why Compute Nodes Keep Rebooting"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en

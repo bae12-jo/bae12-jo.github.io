@@ -1,5 +1,5 @@
 ---
-title: "Part 5: Running NCCL Tests on p6-b200"
+title: "Part 5: NCCL Tests"
 author: Bailey Sohyeon Cho
 layout: post
 lang: en

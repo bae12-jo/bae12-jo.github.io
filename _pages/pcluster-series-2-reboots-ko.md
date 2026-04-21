@@ -1,5 +1,5 @@
 ---
-title: "Part 3: p6-b200 노드가 계속 재부팅되는 이유"
+title: "Part 3: 컴퓨트 노드가 무한 재부팅되는 이유"
 author: Bailey Sohyeon Cho
 layout: post
 lang: ko
