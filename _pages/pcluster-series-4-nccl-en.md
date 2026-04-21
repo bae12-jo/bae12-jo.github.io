@@ -48,6 +48,34 @@ This post covers the setup we used on two p6-b200.48xlarge nodes (16 B200 GPUs t
 
 ---
 
+## What went wrong before it worked
+
+Getting NCCL cross-node tests running took more than one attempt. The failure sequence is worth documenting because each error looks unrelated to the last.
+
+**`srun: command not found` in Slurm job scripts.** When Slurm executes a batch job, the compute node environment doesn't inherit the PATH you'd get in an interactive session. `/opt/slurm/bin` isn't in PATH. Add it explicitly at the top of every job script — but critically, it must go *after* all `#SBATCH` directives. If you put `export PATH=` in the middle of your `#SBATCH` block, Slurm stops parsing `#SBATCH` lines at that point and ignores everything that follows.
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=nccl-test
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=8
+# ← ALL #SBATCH lines must come before any executable statements
+export PATH=/opt/slurm/bin:/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/opt/amazon/openmpi/lib:/opt/amazon/efa/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+**`srun --container-image` not recognized.** The first approach was to run nccl-tests inside the NeMo container using Pyxis. Pyxis adds `--container-image` to `srun`. However, Pyxis only works if it's registered in the HeadNode's `plugstack.conf` and slurmctld has loaded it. Building Pyxis on the HeadNode turned out to be non-trivial (GCC/slurm.h version issues). We dropped containers entirely and built nccl-tests natively on the compute node instead.
+
+**`libmpi.so.40: cannot open shared object file`.** The MPI-linked nccl-tests binary needs `/opt/amazon/openmpi/lib` in `LD_LIBRARY_PATH`. It's not there by default in the Slurm job environment. Add it explicitly in your env file.
+
+**`MPI_Init` fails — srun and OpenMPI PMI incompatibility.** After fixing the library path, the next failure was MPI initialization. The error message: `OMPI was not built with SLURM's PMI support`. The `/opt/amazon/openmpi` on pcluster nodes is not compiled with Slurm PMI. `srun` cannot be used to launch MPI-linked binaries. Switch to `mpirun` with a hostfile.
+
+**`Bootstrap: no socket interface found`.** With mpirun working, NCCL's bootstrap rendezvous still failed. NCCL was trying to use the EFA interfaces (`rdmap*`) for bootstrap, but those interfaces don't support the TCP socket operations NCCL's bootstrapper needs. Setting `NCCL_SOCKET_IFNAME=enp71s0` (the standard Ethernet interface) fixed this.
+
+**`Permission denied` running mpirun cross-node.** Root SSH between nodes is blocked by pcluster. mpirun needs SSH to launch processes on remote nodes. The solution: run mpirun as the `ubuntu` user. pcluster configures passwordless SSH for ubuntu between cluster nodes.
+
+---
+
 ## Building nccl-tests
 
 NCCL dev libraries aren't on the pcluster AMI. Install them first:
@@ -75,6 +103,8 @@ cp build/*_perf /fsx/nccl-tests/bin/
 ```
 
 Build once, use from every node via FSx. No need to rebuild on each node launch.
+
+One naming note: the all-to-all binary is `alltoall_perf`, not `all_to_all_perf`. If you script around the binary names, that underscore difference will cause a silent failure.
 
 ---
 

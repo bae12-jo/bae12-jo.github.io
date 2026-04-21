@@ -48,6 +48,34 @@ lang_peer: /pages/pcluster-series-4-nccl-en/
 
 ---
 
+## 성공하기 전에 겪은 것들
+
+NCCL 크로스 노드 테스트를 실행하기까지 한 번에 되지 않았습니다. 에러 순서를 기록해 둡니다. 각각이 서로 무관해 보이지만 연결된 문제들입니다.
+
+**Slurm job 스크립트에서 `srun: command not found`.** Slurm이 배치 잡을 실행할 때 컴퓨트 노드 환경은 인터랙티브 세션의 PATH를 상속하지 않습니다. `/opt/slurm/bin`이 PATH에 없습니다. 모든 job 스크립트 앞에 명시적으로 추가해야 합니다. 단, 반드시 모든 `#SBATCH` 지시문 *이후*에 넣어야 합니다. `export PATH=`를 `#SBATCH` 블록 중간에 넣으면 Slurm이 그 시점부터 `#SBATCH` 줄 파싱을 멈추고 이후 지시문을 전부 무시합니다.
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=nccl-test
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=8
+# ← 모든 #SBATCH 줄은 반드시 실행 가능한 구문보다 앞에 있어야 함
+export PATH=/opt/slurm/bin:/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/opt/amazon/openmpi/lib:/opt/amazon/efa/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+**`srun --container-image` 미지원.** 처음에는 Pyxis를 써서 NeMo 컨테이너 안에서 nccl-tests를 실행하려고 했습니다. Pyxis가 `srun`에 `--container-image`를 추가합니다. 그런데 Pyxis는 HeadNode의 `plugstack.conf`에 등록되어 있고 slurmctld가 로드한 경우에만 동작합니다. HeadNode에서 Pyxis를 빌드하는 것이 GCC/slurm.h 버전 문제로 잘 안 됐습니다. 컨테이너를 완전히 포기하고 컴퓨트 노드에서 nccl-tests를 네이티브로 빌드하는 방향으로 바꿨습니다.
+
+**`libmpi.so.40: cannot open shared object file`.** MPI 링크된 nccl-tests 바이너리는 `LD_LIBRARY_PATH`에 `/opt/amazon/openmpi/lib`가 필요합니다. Slurm job 환경에서는 기본으로 없습니다. env 파일에 명시적으로 추가해야 합니다.
+
+**`MPI_Init` 실패 — srun과 OpenMPI PMI 비호환.** 라이브러리 경로를 고치고 나면 다음 실패는 MPI 초기화입니다. 에러 메시지: `OMPI was not built with SLURM's PMI support`. pcluster 노드의 `/opt/amazon/openmpi`는 Slurm PMI 없이 컴파일됐습니다. `srun`으로 MPI 링크 바이너리를 실행할 수 없습니다. hostfile을 쓰는 `mpirun`으로 전환합니다.
+
+**`Bootstrap: no socket interface found`.** mpirun이 동작하면 NCCL bootstrap rendezvous가 실패합니다. NCCL이 EFA 인터페이스(`rdmap*`)로 bootstrap을 시도하는데, 이 인터페이스는 NCCL bootstrapper가 필요한 TCP 소켓 작업을 지원하지 않습니다. `NCCL_SOCKET_IFNAME=enp71s0`(일반 이더넷 인터페이스)으로 설정하면 해결됩니다.
+
+**크로스 노드 mpirun 실행 시 `Permission denied`.** 노드 간 root SSH는 pcluster가 차단합니다. mpirun은 원격 노드에서 프로세스를 시작하기 위해 SSH가 필요합니다. `ubuntu` 유저로 mpirun을 실행하면 됩니다. pcluster가 클러스터 노드 간 ubuntu 유저의 패스워드 없는 SSH를 설정해 둡니다.
+
+---
+
 ## nccl-tests 빌드
 
 pcluster AMI에 NCCL dev 라이브러리가 없습니다. 먼저 설치합니다:
@@ -74,6 +102,8 @@ cp build/*_perf /fsx/nccl-tests/bin/
 ```
 
 한 번 빌드하면 FSx를 통해 모든 노드에서 사용 가능합니다. 노드 시작마다 재빌드할 필요 없습니다.
+
+바이너리 이름 주의: all-to-all 바이너리는 `all_to_all_perf`가 아니라 `alltoall_perf`입니다. 스크립트에서 바이너리 이름을 직접 쓴다면 이 언더바 차이가 조용한 실패를 만듭니다.
 
 ---
 
