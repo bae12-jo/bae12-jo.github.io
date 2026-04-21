@@ -10,6 +10,8 @@ ko:
         url: /pages/pcluster-series-2-reboots-ko/
       - title: "Part 4: 커스텀 AMI 만들기"
         url: /pages/pcluster-series-3-custom-ami-ko/
+      - title: "Part 5: p6-b200 NCCL 테스트"
+        url: /pages/pcluster-series-4-nccl-ko/
 
 en:
   - title: "Setting Up a GPU Cluster for Distributed Training"
@@ -23,3 +25,5 @@ en:
         url: /pages/pcluster-series-2-reboots/
       - title: "Part 4: Building a Custom AMI for p6-b200"
         url: /pages/pcluster-series-3-custom-ami/
+      - title: "Part 5: NCCL Tests on p6-b200"
+        url: /pages/pcluster-series-4-nccl-en/

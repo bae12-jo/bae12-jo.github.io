@@ -16,6 +16,40 @@ Part 3 identified four root causes. This post fixes them — permanently, at AMI
 
 ---
 
+## Always build from a clean instance
+
+Before anything else: build the AMI from a dedicated build instance, not from a running compute node.
+
+The temptation is to take a node that's already bootstrapped and working, tweak it, and snapshot it. The problem is that a bootstrapped compute node is in a state that ParallelCluster fully owns. slurmd is running. Docker is active. post-slurmd services are up. cloud-init has already run once and left its state on disk.
+
+When you snapshot that node and launch new instances from the AMI, cloud-init runs again. It tries to re-initialize a system that's already partially initialized. The state conflicts with what ParallelCluster's cinc cookbooks expect. Nodes fail in the cinc finalize phase and get replaced in a loop.
+
+We hit this exactly. An AMI built from a running node (`ami-00529ac6ce247fa62`) produced nodes that died within 7 minutes on every launch. Switching to a clean build instance fixed it immediately.
+
+The correct approach:
+
+```bash
+# 1. Launch a fresh instance from the official pcluster base AMI
+#    us-east-1: ami-0f8eed74478b388d3
+#    us-east-2: ami-0dc2ffd737d30ca8a
+
+# 2. Install packages — but do NOT start services
+#    Enable fabricmanager, don't start it. Docker should not be running.
+
+# 3. Run ami_cleanup.sh before snapshotting
+sudo /usr/local/sbin/ami_cleanup.sh
+
+# 4. Create the AMI with --no-reboot
+aws ec2 create-image --instance-id <ID> --name "..." --no-reboot
+```
+
+> ##### DANGER
+>
+> Never build an AMI from a running compute node. The bootstrap state that slurmd, Docker, and post-slurmd services leave behind will conflict with ParallelCluster's initialization sequence on every new node launch.
+{: .block-danger }
+
+---
+
 ## Why AMI, not scripts
 
 OnNodeStart and OnNodeConfigured scripts are fine for things that run after cinc. They're not fine when the problem is in the cinc phase itself.
