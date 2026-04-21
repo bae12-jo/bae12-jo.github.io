@@ -10,8 +10,12 @@ ko:
         url: /pages/pcluster-series-2-reboots-ko/
       - title: "Part 4: 커스텀 AMI 만들기"
         url: /pages/pcluster-series-3-custom-ami-ko/
-      - title: "Part 5: NCCL 테스트"
-        url: /pages/pcluster-series-4-nccl-ko/
+      - title: "Part 5: 노드 상태 읽기"
+        url: /pages/pcluster-series-5-node-states-ko/
+      - title: "Part 6: 모니터링"
+        url: /pages/pcluster-series-5-monitoring-ko/
+      - title: "Part 7: NCCL 테스트"
+        url: /pages/pcluster-series-6-nccl-ko/
 
 en:
   - title: "Setting Up a GPU Cluster for Distributed Training"
@@ -25,5 +29,9 @@ en:
         url: /pages/pcluster-series-2-reboots/
       - title: "Part 4: Building a Custom AMI for p6-b200"
         url: /pages/pcluster-series-3-custom-ami/
-      - title: "Part 5: NCCL Tests"
-        url: /pages/pcluster-series-4-nccl-en/
+      - title: "Part 5: Reading Node States"
+        url: /pages/pcluster-series-5-node-states-en/
+      - title: "Part 6: Monitoring"
+        url: /pages/pcluster-series-5-monitoring-en/
+      - title: "Part 7: NCCL Tests"
+        url: /pages/pcluster-series-6-nccl-en/

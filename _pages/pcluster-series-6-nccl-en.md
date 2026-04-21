@@ -1,0 +1,252 @@
+---
+title: "Part 7: NCCL Tests"
+author: Bailey Sohyeon Cho
+layout: post
+lang: en
+lang_peer: /pages/pcluster-series-6-nccl-ko/
+---
+
+# Running NCCL Tests on p6-b200: Cross-Node Bandwidth on B200 with EFA v3
+
+> **Series**: Setting Up a GPU Cluster for Distributed Training
+>
+> [← Part 4: Building a Custom AMI](/pages/pcluster-series-3-custom-ami/)
+
+Once the cluster is stable, the first thing worth measuring is inter-node communication bandwidth. NCCL tests give you a precise picture of what your network fabric is actually delivering — before you run any real training job.
+
+This post covers the setup we used on two p6-b200.48xlarge nodes (16 B200 GPUs total, connected via EFA v3) and the results.
+
+---
+
+## Why this is harder than it looks
+
+`nccl-tests` seems simple to run. Clone the repo, build, execute. On a GPU cluster with EFA, there are several places it can go wrong silently:
+
+- MPI doesn't interoperate with Slurm's `srun` unless OpenMPI was built with PMI support. The `/opt/amazon/openmpi` on pcluster AMIs is not built with Slurm PMI. Using `srun` with MPI-linked binaries causes `MPI_Init` to fail.
+- The bootstrap network interface (`enp71s0` on p6-b200) is different from the EFA data interfaces (`rdmap*`). Setting `NCCL_SOCKET_IFNAME` to an EFA interface breaks bootstrapping.
+- Cross-node SSH for `mpirun` requires the ubuntu user's key — not root. root SSH is blocked by pcluster.
+- NCCL libraries aren't included in the pcluster AMI. `libnccl-dev` must be installed separately before building nccl-tests.
+
+---
+
+## What we're working with
+
+**Hardware:**
+- 2x p6-b200.48xlarge
+- 8x NVIDIA B200 per node (16 total)
+- NVLink5 intra-node fabric
+
+**Network:**
+- EFA v3: 32 EFA adapters per node, 100 Gbps each = 3.2 Tbps = 400 GB/s total per node
+- TCP bootstrap interface: `enp71s0`
+- EFA data interfaces: `rdmap79s0`, `rdmap80s0`, `rdmap96s0`, `rdmap97s0`, `rdmap113s0`, `rdmap114s0`, `rdmap132s0`, `rdmap133s0` (and more)
+
+**Software:**
+- NCCL 2.29.7+cuda13.2
+- nccl-tests 2.18.3
+- OpenMPI from `/opt/amazon/openmpi`
+
+---
+
+## What went wrong before it worked
+
+Getting NCCL cross-node tests running took more than one attempt. The failure sequence is worth documenting because each error looks unrelated to the last.
+
+**`srun: command not found` in Slurm job scripts.** When Slurm executes a batch job, the compute node environment doesn't inherit the PATH you'd get in an interactive session. `/opt/slurm/bin` isn't in PATH. Add it explicitly at the top of every job script — but critically, it must go *after* all `#SBATCH` directives. If you put `export PATH=` in the middle of your `#SBATCH` block, Slurm stops parsing `#SBATCH` lines at that point and ignores everything that follows.
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=nccl-test
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=8
+# ← ALL #SBATCH lines must come before any executable statements
+export PATH=/opt/slurm/bin:/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/opt/amazon/openmpi/lib:/opt/amazon/efa/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+**`srun --container-image` not recognized.** The first approach was to run nccl-tests inside the NeMo container using Pyxis. Pyxis adds `--container-image` to `srun`. However, Pyxis only works if it's registered in the HeadNode's `plugstack.conf` and slurmctld has loaded it. Building Pyxis on the HeadNode turned out to be non-trivial (GCC/slurm.h version issues). We dropped containers entirely and built nccl-tests natively on the compute node instead.
+
+**`libmpi.so.40: cannot open shared object file`.** The MPI-linked nccl-tests binary needs `/opt/amazon/openmpi/lib` in `LD_LIBRARY_PATH`. It's not there by default in the Slurm job environment. Add it explicitly in your env file.
+
+**`MPI_Init` fails — srun and OpenMPI PMI incompatibility.** After fixing the library path, the next failure was MPI initialization. The error message: `OMPI was not built with SLURM's PMI support`. The `/opt/amazon/openmpi` on pcluster nodes is not compiled with Slurm PMI. `srun` cannot be used to launch MPI-linked binaries. Switch to `mpirun` with a hostfile.
+
+**`Bootstrap: no socket interface found`.** With mpirun working, NCCL's bootstrap rendezvous still failed. NCCL was trying to use the EFA interfaces (`rdmap*`) for bootstrap, but those interfaces don't support the TCP socket operations NCCL's bootstrapper needs. Setting `NCCL_SOCKET_IFNAME=enp71s0` (the standard Ethernet interface) fixed this.
+
+**`Permission denied` running mpirun cross-node.** Root SSH between nodes is blocked by pcluster. mpirun needs SSH to launch processes on remote nodes. The solution: run mpirun as the `ubuntu` user. pcluster configures passwordless SSH for ubuntu between cluster nodes.
+
+---
+
+## Building nccl-tests
+
+NCCL dev libraries aren't on the pcluster AMI. Install them first:
+
+```bash
+# Add CUDA repo
+curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+  -o /tmp/cuda-keyring.deb
+dpkg -i /tmp/cuda-keyring.deb && apt-get update -qq
+apt-get install -y libnccl2 libnccl-dev
+```
+
+Build nccl-tests with MPI. Build it on a compute node (the HeadNode has no GPUs and no CUDA), save to shared FSx so every node can use the same binary:
+
+```bash
+mkdir -p /fsx/nccl-tests/bin
+cd /tmp && git clone --depth=1 https://github.com/NVIDIA/nccl-tests.git
+cd nccl-tests
+make MPI=1 \
+     MPI_HOME=/opt/amazon/openmpi \
+     CUDA_HOME=/usr/local/cuda \
+     NCCL_HOME=/usr \
+     -j$(nproc)
+cp build/*_perf /fsx/nccl-tests/bin/
+```
+
+Build once, use from every node via FSx. No need to rebuild on each node launch.
+
+One naming note: the all-to-all binary is `alltoall_perf`, not `all_to_all_perf`. If you script around the binary names, that underscore difference will cause a silent failure.
+
+---
+
+## Canceling jobs safely
+
+One behavior that catches people off guard: canceling a running NCCL job and immediately submitting a new one will kill your node.
+
+When you `scancel` a job, Slurm sends SIGKILL to the job's processes but slurmd and slurmstepd need time to clean up. If a new job lands on the node before that cleanup finishes, slurmd throws an "Unspecified error". clustermgtd sees that as a node health failure and terminates the instance immediately. On a Capacity Block reservation, getting a replacement takes 30 to 40 minutes.
+
+```bash
+# wrong — node dies
+scancel <JOB_ID>
+sbatch next_job.sh   # immediately
+
+# correct
+scancel <JOB_ID>
+sleep 60             # wait for slurmd cleanup
+scontrol update nodename=<NODE> state=resume   # if node went to drain
+sleep 120            # wait for node to reach idle
+sbatch next_job.sh
+```
+
+The 60-second wait after scancel is the minimum. Two to three minutes is safer if the previous job was doing heavy GPU work. Check `sinfo -N` and wait for a clean `idle` state (no suffix) before submitting.
+
+This is a known pcluster behavior. A feature request is in progress for a `hold_drain_nodes_timeout` option that would give nodes a recovery window instead of terminating immediately. Until that ships, the manual wait is the only workaround.
+
+---
+
+## Environment setup
+
+Create an env file that all nodes source before running:
+
+```bash
+# /fsx/nccl-env.sh
+export LD_LIBRARY_PATH=/opt/amazon/openmpi/lib:/opt/amazon/efa/lib:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+export PATH=/opt/amazon/openmpi/bin:/opt/amazon/efa/bin:/usr/local/cuda/bin:/opt/slurm/bin:${PATH}
+
+# EFA
+export FI_PROVIDER=efa
+export FI_EFA_USE_DEVICE_RDMA=1
+
+# NCCL
+export NCCL_SOCKET_IFNAME=enp71s0   # TCP bootstrap — NOT the EFA rdmap interfaces
+export NCCL_IB_DISABLE=0            # allow EFA for data transport
+export NCCL_NET_GDR_LEVEL=5
+export NCCL_CROSS_NIC=1
+export NCCL_DEBUG=WARN
+```
+
+The `NCCL_SOCKET_IFNAME=enp71s0` line is important. NCCL uses this interface for its bootstrap rendezvous (process discovery). The EFA `rdmap*` interfaces handle the actual data traffic. Using an EFA interface for bootstrap causes `Bootstrap: no socket interface found` and the test fails before data ever moves.
+
+---
+
+## Running cross-node with mpirun
+
+The `/opt/amazon/openmpi` installation on pcluster nodes is not built with Slurm PMI. This means you cannot use `srun` to launch MPI-linked binaries — `MPI_Init` will fail with a message about PMI support.
+
+Use `mpirun` with a hostfile instead. Run it as the `ubuntu` user: cross-node SSH is configured for ubuntu, not root.
+
+```bash
+# Generate hostfile (one line per node, 8 slots each)
+scontrol show hostnames $SLURM_JOB_NODELIST | while read h; do
+  echo "$h slots=8"
+done > /fsx/nccl-hostfile
+
+# Run as ubuntu — root SSH is blocked
+su - ubuntu -c "
+  source /fsx/nccl-env.sh
+  /opt/amazon/openmpi/bin/mpirun \
+    --hostfile /fsx/nccl-hostfile \
+    -np 16 --map-by ppr:8:node \
+    -x PATH -x LD_LIBRARY_PATH \
+    -x FI_PROVIDER -x FI_EFA_USE_DEVICE_RDMA \
+    -x NCCL_SOCKET_IFNAME -x NCCL_IB_DISABLE \
+    -x NCCL_NET_GDR_LEVEL -x NCCL_CROSS_NIC -x NCCL_DEBUG \
+    --mca pml ob1 --mca btl ^openib \
+    --mca btl_tcp_if_exclude lo,docker0 \
+    --bind-to none \
+    /fsx/nccl-tests/bin/all_reduce_perf \
+      --minbytes 1K --maxbytes 8G \
+      --stepfactor 2 --iters 100 --warmup_iters 5 \
+      --check 0 --op sum 2>&1
+"
+```
+
+---
+
+## Results
+
+### AllReduce (2 nodes, 16x B200, EFA v3)
+
+| Size | AlgBW (GB/s) | BusBW (GB/s) | Latency (μs) |
+|------|-------------|-------------|-------------|
+| 1 KB | 0.02 | 0.04 | 52.8 |
+| 1 MB | 9.79 | 18.36 | 107.1 |
+| 64 MB | 129.96 | 243.68 | 516.4 |
+| 256 MB | 232.00 | 435.00 | 1,157 |
+| 1 GB | 304.10 | 570.19 | 3,531 |
+| 4 GB | 349.15 | 654.67 | 12,301 |
+| **8 GB** | **364.75** | **683.90** | **23,550** |
+
+Peak BusBW: **683.90 GB/s**
+
+### AllToAll (2 nodes, 16x B200, EFA v3)
+
+| Size | AlgBW (GB/s) | BusBW (GB/s) | Latency (μs) |
+|------|-------------|-------------|-------------|
+| 1 MB | 6.11 | 5.73 | 171.6 |
+| 64 MB | 59.89 | 56.15 | 1,120 |
+| 256 MB | 86.25 | 80.86 | 3,112 |
+| 1 GB | 92.80 | 87.00 | 11,571 |
+| **8 GB** | **95.09** | **89.14** | **90,339** |
+
+Peak BusBW: **89.14 GB/s**
+
+---
+
+## How to read these numbers
+
+**AllReduce busbw** follows the ring algorithm formula: `busbw = algbw × 2×(N-1)/N`. With N=16 ranks, that's `algbw × 1.875`. Our peak algbw of 364.75 GB/s × 1.875 = 683.9 GB/s. The formula checks out — the measurement is internally consistent.
+
+**EFA efficiency**: Each node has 400 GB/s total EFA bandwidth. Peak algbw of 364.75 GB/s is 91% of that theoretical maximum. That's a strong result — most deployments sit in the 60-85% range due to protocol overhead and routing.
+
+**AllToAll** is expected to be lower. Each of the 16 ranks needs to send data to 15 others, and only 8 of those 15 are on the other node (going through EFA). The theoretical ceiling for our topology is around 93 GB/s algbw. We hit 95.09 GB/s, which is essentially at line rate.
+
+**Intra-node reference**: Running all_reduce with 8 GPUs on a single node (using NVLink5 only) peaks at 572 GB/s busbw. The cross-node ring peaks higher at 683.90 GB/s because 16 GPUs form a wider ring with more total bandwidth in flight simultaneously.
+
+---
+
+## B200 theoretical peaks for context
+
+| Precision | TFLOPS/GPU | 16 GPU total |
+|-----------|-----------|-------------|
+| FP8 | 18,000 | 288,000 |
+| BF16 | 9,000 | 144,000 |
+| FP32 | 1,800 | 28,800 |
+
+Communication efficiency directly bounds training throughput. At 683 GB/s all_reduce bandwidth, gradient synchronization between these two nodes takes about 24ms for an 8GB all-reduce. For a 70B parameter model in BF16, that's roughly 140GB of gradients — about a 5-second all-reduce at peak. Overlap with compute is what makes this tolerable in practice.
+
+---
+
+> **Series**: Setting Up a GPU Cluster for Distributed Training
+>
+> [← Part 4: Building a Custom AMI](/pages/pcluster-series-3-custom-ami/) | You are here: **Part 7: NCCL Tests on p6-b200**
+{: .block-tip }
