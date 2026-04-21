@@ -107,6 +107,31 @@ cp build/*_perf /fsx/nccl-tests/bin/
 
 ---
 
+## 잡 취소 시 주의사항
+
+잘 모르면 당하는 동작이 있습니다. 실행 중인 NCCL 잡을 취소하고 즉시 새 잡을 제출하면 노드가 죽습니다.
+
+`scancel`로 잡을 취소하면 Slurm이 잡 프로세스에 SIGKILL을 보내는데, slurmd와 slurmstepd가 정리를 완료하는 데 시간이 필요합니다. 그 정리가 끝나기 전에 새 잡이 노드에 배정되면 slurmd가 "Unspecified error"를 던집니다. clustermgtd는 이를 노드 헬스 실패로 판단하고 인스턴스를 즉시 종료합니다. Capacity Block 예약 환경에서는 교체 인스턴스를 받기까지 30~40분이 걸립니다.
+
+```bash
+# 잘못된 방법 — 노드 죽음
+scancel <JOB_ID>
+sbatch next_job.sh   # 즉시
+
+# 올바른 방법
+scancel <JOB_ID>
+sleep 60             # slurmd 정리 대기
+scontrol update nodename=<NODE> state=resume   # drain 상태면 복구
+sleep 120            # 노드가 idle 될 때까지 대기
+sbatch next_job.sh
+```
+
+scancel 후 60초는 최소값입니다. 이전 잡이 무거운 GPU 작업을 하고 있었다면 2~3분이 더 안전합니다. `sinfo -N`에서 suffix 없는 깨끗한 `idle` 상태를 확인한 후 제출하세요.
+
+이것은 pcluster의 알려진 동작입니다. unhealthy 판정 즉시 종료 대신 복구 기회를 주는 `hold_drain_nodes_timeout` 옵션 기능 요청이 진행 중입니다. 해당 기능이 나오기 전까지는 수동 대기가 유일한 workaround입니다.
+
+---
+
 ## 환경 설정
 
 모든 노드가 실행 전에 source할 env 파일을 만듭니다:

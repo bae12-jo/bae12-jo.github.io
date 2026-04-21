@@ -108,6 +108,31 @@ One naming note: the all-to-all binary is `alltoall_perf`, not `all_to_all_perf`
 
 ---
 
+## Canceling jobs safely
+
+One behavior that catches people off guard: canceling a running NCCL job and immediately submitting a new one will kill your node.
+
+When you `scancel` a job, Slurm sends SIGKILL to the job's processes but slurmd and slurmstepd need time to clean up. If a new job lands on the node before that cleanup finishes, slurmd throws an "Unspecified error". clustermgtd sees that as a node health failure and terminates the instance immediately. On a Capacity Block reservation, getting a replacement takes 30 to 40 minutes.
+
+```bash
+# wrong — node dies
+scancel <JOB_ID>
+sbatch next_job.sh   # immediately
+
+# correct
+scancel <JOB_ID>
+sleep 60             # wait for slurmd cleanup
+scontrol update nodename=<NODE> state=resume   # if node went to drain
+sleep 120            # wait for node to reach idle
+sbatch next_job.sh
+```
+
+The 60-second wait after scancel is the minimum. Two to three minutes is safer if the previous job was doing heavy GPU work. Check `sinfo -N` and wait for a clean `idle` state (no suffix) before submitting.
+
+This is a known pcluster behavior. A feature request is in progress for a `hold_drain_nodes_timeout` option that would give nodes a recovery window instead of terminating immediately. Until that ships, the manual wait is the only workaround.
+
+---
+
 ## Environment setup
 
 Create an env file that all nodes source before running:
